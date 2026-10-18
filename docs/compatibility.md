@@ -37,7 +37,7 @@ The host tests exercise parser and state-machine behavior. They do not simulate 
 
 这些硬件验证使用相同桥接核心的原集成固件；独立版删除网络等无关组件，默认关闭切换热键。v0.1.0 的独立工厂镜像也已经实际刷入，验证了打字、Shift、退格、松键和无需拔插的重启恢复。可选热键的实测来自同核心的集成配置。
 
-**尚未证明 NKRO 是唯一根因。**没有隔离测试接口数量、Report ID、NKRO 和 USB 版本等变量，也未确认 KVM 主控型号。其他键盘、KVM 和 P4 开发板请提供实测结果。
+**尚未证明 NKRO 是唯一根因**。没有隔离测试接口数量、Report ID、NKRO 和 USB 版本等变量，也未确认 KVM 主控型号。其他键盘、KVM 和 P4 开发板请提供实测结果。
 
 ## Reporting another combination
 
