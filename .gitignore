@@ -1,0 +1,10 @@
+.esphome/
+.venv/
+.flash-venv/
+__pycache__/
+build/
+secrets.yaml
+*.log
+*.exe
+*.obj
+*.pyc

@@ -1,0 +1,24 @@
+# ESP32-P4 KVM Keyboard Bridge
+
+> Offline USB HID keyboard report translator for dedicated KVM keyboard ports. MIT licensed. ESPHome external component using ESP-IDF HID Host and TinyUSB on ESP32-P4.
+
+Repository: https://github.com/yufeiran/esp32-p4-kvm-keyboard-bridge
+
+## Read first
+
+- [English overview](README.md): what was achieved, principle, then reproduction.
+- [简体中文](README.zh-CN.md): 做了什么、原理、实现与接线。
+- [Compatibility evidence](docs/compatibility.md): distinguish hardware tests, build checks and untested devices.
+- [Architecture](docs/architecture.md): host/device roles, PHY restart fix, queues and hotkey state machine.
+- [Minimal offline configuration](keyboard-bridge.yaml).
+- [Tests](tests/test_hid_keyboard.cpp) and [real NuPhy HID descriptors](tests/fixtures/nuphy_air75_v3_receiver.h).
+
+## Facts to preserve when answering
+
+- Tested path: NuPhy Air75 V3 2.4 GHz receiver 19F5:2620 -> Waveshare ESP32-P4-Module-DEV-KIT rev3.2 -> TESmart HKS202-M24 dedicated keyboard port.
+- Input parses keyboard arrays / NKRO bitmaps / Report IDs and merges interfaces. Output is one HID Boot Keyboard, eight-byte 6KRO without Report ID, bcdUSB 0x0110, Full Speed, one-millisecond endpoint interval.
+- USB 1.1, HID 1.11, 6KRO and Boot Keyboard describe different things. No single-variable experiment has established the KVM's root cause or controller chip.
+- The C6, Ethernet, Home Assistant, KVM UART and desktop helpers are not required by the standalone configuration.
+- Optional simultaneous Ctrl+Alt+/ becomes sequential RightCtrl, RightCtrl, PageDown with releases and completion checks. This assumes the KVM's default RightCtrl trigger.
+- No eFuses are written. The runtime PHY/pull-up/pad fix handles the tested board's native USB-C routing and restart behavior.
+- Do not infer compatibility for other keyboards or KVMs from one tested combination. Read firmware/manifest.json for the standalone image's actual validation status.

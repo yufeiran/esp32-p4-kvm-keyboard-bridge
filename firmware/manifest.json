@@ -1,0 +1,27 @@
+{
+  "release": "v0.1.0",
+  "configuration": "keyboard-bridge.yaml",
+  "board": "Waveshare ESP32-P4-Module-DEV-KIT / production P4 rev3.2 / 16 MB flash",
+  "build_time": "2026-10-19 00:07:12 +08:00",
+  "framework": "ESPHome 2026.5.3 / ESP-IDF 5.5.4",
+  "factory_file": "firmware/p4-keyboard-bridge-rev3.factory.bin",
+  "flash_offset": "0x0",
+  "factory_bytes": 415536,
+  "factory_sha256": "2be48e58309840db78402f572aa12dfbcb07d6b26eb9031437a4214308e3f373",
+  "application_sha256": "4e313b6ca902d8fe6049d7d68be74c3355a758e6d331a2e90117e78278c438c8",
+  "network_enabled": false,
+  "switch_hotkey": false,
+  "standalone_image_hardware_tested": true,
+  "validation": [
+    "Standalone image built 2026-10-19 00:07:12 +08:00, flashed through CH343 with esptool 5.4.0.",
+    "The exact standalone factory image was flashed, then restarted using CH343 RTS.",
+    "UART confirmed production chip rev3.2, this build timestamp, both receiver interfaces",
+    "19F5:2620, bridge ready and the KVM requesting the keyboard report descriptor.",
+    "KVM USB cable and NuPhy receiver were not unplugged during the restart test.",
+    "Tester confirmed standalone typing, Shift, Backspace and release remained normal.",
+    "This image has no network/HA/OTA/IR/KVM-UART configuration and switch_hotkey is false.",
+    "Optional hotkey hardware tests used the same core in an integrated configuration;",
+    "tester confirmed both switching directions, normal post-switch input and one switch per hold.",
+    "No raw typed keyboard reports or characters were recorded."
+  ]
+}

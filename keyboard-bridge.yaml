@@ -1,0 +1,34 @@
+# Waveshare ESP32-P4-Module-DEV-KIT, production rev3 silicon, 16 MB flash.
+# Standalone keyboard bridge: no network, Home Assistant, C6 or desktop helper.
+esphome:
+  name: p4-keyboard-bridge
+  friendly_name: P4 Keyboard Bridge
+  min_version: 2026.5.3
+
+esp32:
+  board: esp32-p4_r3-evboard
+  variant: esp32p4
+  engineering_sample: false
+  flash_size: 16MB
+  cpu_frequency: 360MHz
+  framework:
+    type: esp-idf
+    version: 5.5.4
+
+external_components:
+  - source:
+      type: local
+      path: components
+    components: [kvm_usb_bridge]
+
+kvm_usb_bridge:
+  id: keyboard_bridge
+  # Optional TESmart shortcut: simultaneous Ctrl+Alt+/ becomes
+  # RightCtrl tap -> RightCtrl tap -> PageDown tap (next input).
+  switch_hotkey: false
+
+logger:
+  hardware_uart: UART0
+  baud_rate: 115200
+  level: INFO
+  task_log_buffer_size: 4096

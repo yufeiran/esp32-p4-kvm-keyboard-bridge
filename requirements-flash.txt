@@ -1,0 +1,3 @@
+# Separate environment: ESPHome 2026.5.3 pins esptool 5.2.0, while the tested
+# production-rev3 P4 serial flashing path requires the newer chip support.
+esptool==5.4.0

@@ -1,0 +1,28 @@
+name: Keyboard / KVM compatibility
+description: Report a tested working or failing hardware combination.
+body:
+  - type: input
+    id: hardware
+    attributes:
+      label: Keyboard, receiver, firmware, KVM and P4 board revision
+    validations:
+      required: true
+  - type: textarea
+    id: connections
+    attributes:
+      label: Wiring and firmware revision
+      description: Include USB-A port / HOST jumper, USB-C port, commit or release, and optional hotkey setting.
+    validations:
+      required: true
+  - type: textarea
+    id: result
+    attributes:
+      label: Result and reproduction
+      description: Compare direct-to-PC, direct-to-KVM and through-P4. Include typing, modifiers, unplug/replug and restart results.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Sanitized diagnostics
+      description: Share descriptor metadata / counters only. Remove network details, serial identifiers, credentials and typed content.

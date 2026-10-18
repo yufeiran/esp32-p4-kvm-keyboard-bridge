@@ -1,0 +1,32 @@
+test_hid_keyboard.cpp
+PASS boot 6KRO, modifiers, padding, LEDs, truncated input, release
+PASS 144-bit NKRO -> 6KRO, seventh-key rollover and recovery
+PASS report IDs, Push/Pop, consumer isolation, interface merge
+PASS input error preservation, disconnect release, malformed descriptors
+PASS actual Air75 V3 receiver descriptors: 8/19-byte inputs, LEDs, merge and release
+PASS 10000 malformed/random descriptor robustness cases
+PASS Ctrl+Alt+/ consumed, exact acknowledged KVM macro, held-key suppression and debounce
+PASS left/right modifiers, Shift/GUI exclusion, all six chord arrival orders
+PASS timeout/abort without replay, timer wrap, and release before sequence completion
+
+Linked-firmware descriptor audit:
+PASS USB 1.10 device descriptor
+PASS class per interface, EP0 64 bytes, one configuration
+PASS one interface, complete 34-byte configuration descriptor
+PASS HID Boot Keyboard interface, one endpoint
+PASS HID 1.11, correct 63-byte report descriptor length
+PASS interrupt IN 0x81, eight-byte maximum packet, one-millisecond interval
+PASS well-bounded HID items and no Report ID
+OTA SHA256 4e313b6ca902d8fe6049d7d68be74c3355a758e6d331a2e90117e78278c438c8
+
+Hardware validation:
+Standalone image built 2026-10-19 00:07:12 +08:00, flashed through CH343 with esptool 5.4.0.
+The exact standalone factory image was flashed, then restarted using CH343 RTS.
+UART confirmed production chip rev3.2, this build timestamp, both receiver interfaces
+19F5:2620, bridge ready and the KVM requesting the keyboard report descriptor.
+KVM USB cable and NuPhy receiver were not unplugged during the restart test.
+Tester confirmed standalone typing, Shift, Backspace and release remained normal.
+This image has no network/HA/OTA/IR/KVM-UART configuration and switch_hotkey is false.
+Optional hotkey hardware tests used the same core in an integrated configuration;
+tester confirmed both switching directions, normal post-switch input and one switch per hold.
+No raw typed keyboard reports or characters were recorded.

@@ -1,0 +1,13 @@
+cmake_minimum_required(VERSION 3.16)
+project(p4_keyboard_bridge_tests LANGUAGES CXX)
+enable_testing()
+add_executable(test_hid_keyboard tests/test_hid_keyboard.cpp)
+target_include_directories(test_hid_keyboard PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(test_hid_keyboard PRIVATE cxx_std_17)
+# These tests use assert; keep assertions enabled even for Release builds.
+if(MSVC)
+  target_compile_options(test_hid_keyboard PRIVATE /W4 /UNDEBUG)
+else()
+  target_compile_options(test_hid_keyboard PRIVATE -Wall -Wextra -Wpedantic -UNDEBUG)
+endif()
+add_test(NAME hid_keyboard_and_hotkey COMMAND test_hid_keyboard)
