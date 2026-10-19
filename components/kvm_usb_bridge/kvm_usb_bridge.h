@@ -36,7 +36,7 @@ class KVMUSBBridge : public Component {
   uint32_t delivered_reports() const { return delivered_.load(); }
   uint32_t recovery_count() const { return recoveries_.load(); }
   uint32_t stale_reports() const { return stale_.load(); }
-  void report_delivered() { delivered_.fetch_add(1); report_in_flight_.store(false); }
+  void report_delivered(const uint8_t *report, uint16_t length);
   void report_failed() { output_failed_.store(true); report_in_flight_.store(false); }
   uint8_t leds() const { return leds_.load(); }
   void set_leds(uint8_t value) { leds_.store(value & 0x1F); led_revision_.fetch_add(1); }
@@ -46,13 +46,20 @@ class KVMUSBBridge : public Component {
   void set_swap_data_pins(bool value) { swap_data_pins_ = value; }
   void set_dump_descriptors(bool value) { dump_descriptors_ = value; }
   void set_switch_hotkey(bool value) { switch_hotkey_.set_enabled(value); }
+  void set_trace_key_counts(bool value) { trace_key_counts_ = value; }
+  void set_drain_auxiliary_interfaces(bool value) { drain_auxiliary_interfaces_ = value; }
   BootReport current_report();
 
  protected:
   struct Slot {
+    KVMUSBBridge *owner{nullptr};
+    std::atomic<bool> keyboard{false};
     hid_host_device_handle_t handle{nullptr};
     KeyboardDescriptor descriptor;
     bool led_pending{false};
+    uint8_t interface_number{0};
+    uint16_t trace_counts{0xFFFF};
+    uint16_t trace_length{0xFFFF};
   };
   struct Event {
     hid_host_device_handle_t handle{nullptr};
@@ -70,6 +77,12 @@ class KVMUSBBridge : public Component {
     uint16_t length{0};
     uint8_t data[64]{};
   };
+  // Counts/times only: no usages, characters or raw input reports in traces.
+  struct CountTrace {
+    uint32_t at_ms{0}, sequence{0}, age_ms{0};
+    uint16_t counts{0};
+    uint8_t stage{0}, source{0}, queued{0};
+  };
   static void host_daemon_(void *arg);
   static void bridge_task_(void *arg);
   static void control_task_(void *arg);
@@ -86,11 +99,14 @@ class KVMUSBBridge : public Component {
   void reconnect_output_();
   void queue_control_(const ControlRequest &request);
   void service_leds_();
+  void trace_counts_(uint8_t stage, uint8_t source, uint16_t counts, uint32_t at,
+                     uint32_t sequence, uint32_t age, uint8_t queued);
   std::array<Slot, 8> slots_;
   ReportBuffer reports_;
   ReleaseGate release_gate_;
   QueueHandle_t events_{nullptr};
   QueueHandle_t controls_{nullptr};
+  QueueHandle_t count_traces_{nullptr};
   BootReport desired_{};
   BootReport last_enqueued_{};
   portMUX_TYPE state_mux_ = portMUX_INITIALIZER_UNLOCKED;
@@ -129,11 +145,23 @@ class KVMUSBBridge : public Component {
   std::atomic<uint32_t> max_worker_gap_ms_{0};
   std::atomic<uint32_t> queued_output_{0};
   std::atomic<uint32_t> in_flight_age_ms_{0};
+  std::atomic<uint32_t> submitted_at_ms_{0};
+  std::atomic<uint32_t> max_input_age_ms_{0}, max_output_wait_ms_{0}, max_ack_ms_{0}, max_output_depth_{0};
+  std::atomic<uint32_t> trace_drops_{0};
+  std::atomic<uint32_t> input_callbacks_{0}, empty_input_{0}, array_input_{0}, bitmap_input_{0}, other_input_{0};
+  std::atomic<uint32_t> auxiliary_reports_{0}, auxiliary_errors_{0};
+  std::atomic<uint8_t> auxiliary_count_{0};
+  std::atomic<uint16_t> input_counts_{0}, desired_counts_{0}, acked_counts_{0};
+  std::atomic<uint16_t> traced_ack_counts_{0xFFFF};
+  std::atomic<bool> waiting_for_release_{false};
+  uint16_t traced_desired_counts_{0xFFFF};
   uint32_t last_status_ms_{0};
   bool host_enabled_{true};
   uint8_t output_phy_{0};
   bool swap_data_pins_{false};
   bool dump_descriptors_{false};
+  bool trace_key_counts_{false};
+  bool drain_auxiliary_interfaces_{false};
   SwitchHotkey switch_hotkey_;
 };
 

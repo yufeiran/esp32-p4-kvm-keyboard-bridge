@@ -26,6 +26,7 @@
   ],
   "source_ref": "v0.1.0",
   "known_issues": [
-    "This initial binary predates the 2026-10-19 long-idle/suspend/backlog recovery fixes. Build current source for those changes."
+    "This initial binary predates the 2026-10-19 long-idle/suspend/backlog recovery fixes. Build current source for those changes.",
+    "This initial binary also predates the 2026-10-19 auxiliary-interface retention update for the keyboard radio-reconnect stuck-key investigation."
   ]
 }

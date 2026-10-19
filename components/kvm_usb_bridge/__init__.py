@@ -21,6 +21,8 @@ CONFIG_SCHEMA = cv.All(
         cv.Optional("swap_data_pins", default=False): cv.boolean,
         cv.Optional("dump_descriptors", default=False): cv.boolean,
         cv.Optional("switch_hotkey", default=False): cv.boolean,
+        cv.Optional("trace_key_counts", default=False): cv.boolean,
+        cv.Optional("drain_auxiliary_interfaces", default=False): cv.boolean,
     }).extend(cv.COMPONENT_SCHEMA),
     esp32.only_on_variant(supported=[esp32.VARIANT_ESP32P4]),
 )
@@ -46,6 +48,8 @@ async def to_code(config):
     cg.add(var.set_swap_data_pins(config["swap_data_pins"]))
     cg.add(var.set_dump_descriptors(config["dump_descriptors"]))
     cg.add(var.set_switch_hotkey(config["switch_hotkey"]))
+    cg.add(var.set_trace_key_counts(config["trace_key_counts"]))
+    cg.add(var.set_drain_auxiliary_interfaces(config["drain_auxiliary_interfaces"]))
     esp32.add_idf_component(name="espressif/esp_tinyusb", ref="2.1.1")
     esp32.add_idf_component(name="espressif/usb_host_hid", ref="1.1.0")
     esp32.include_builtin_idf_component("usb")

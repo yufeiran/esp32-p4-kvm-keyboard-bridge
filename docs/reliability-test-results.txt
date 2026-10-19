@@ -52,3 +52,16 @@ Post-test: 2 input interfaces, output connected, no queued/in-flight report,
 zero component input/control errors and queue overflows; max control duration 1ms,
 maximum forwarding worker gap 28ms. No unexplained recovery occurred in this short test.
 Overnight idle validation remains pending.
+
+2026-10-19 auxiliary-interface retention follow-up:
+Integrated image built 21:41:52 +08, SHA256 aefc389dec934c4c7327d1a03e7c5bf20350ff3f4c0feee0b5fc775020765f29.
+Keyboard-off/on with receiver retained on old P4 path reproduced continuous Backspace after physical release.
+Matched direct-PC keyboard-off/on test passed.
+Fault snapshot: callbacks/accepted=86, 19-byte packets only, empty=0, rejected=0, overflow=0, queue=0, completion delay <=1ms.
+After retaining/polling auxiliary interfaces: user confirmed three keyboard-off/on + held-Backspace release cycles passed.
+User confirmed Ctrl+Alt+/ switches both directions and typing afterwards remains normal.
+Two keyboard and two auxiliary interfaces active; zero auxiliary payload reports counted in this short capture.
+No new input/control/auxiliary errors or queue overflows observed.
+Portable suite and integrated linked-descriptor audit passed. Standalone source built and descriptor audit passed; not reflashed here.
+These short tests do not establish overnight stability or isolate the exact receiver/host-driver mechanism.
+Busy-typing snapshot: 328 optional diagnostic trace drops; keyboard/input queue overflows stayed zero. Trace loss is not key-event loss.

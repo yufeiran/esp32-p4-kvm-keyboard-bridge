@@ -23,6 +23,20 @@ namespace esphome::kvm_usb_bridge {
 static const char *const TAG = "kvm_usb_bridge";
 KVMUSBBridge *bridge_instance = nullptr;
 
+// Low byte = ordinary keys held, high byte = modifiers held. Never identify a key.
+static uint16_t key_counts(const KeyState &state) {
+  uint16_t result = 0;
+  for (unsigned usage = 4; usage < 256; usage++)
+    if (state.down(usage)) result += usage >= 0xE0 && usage <= 0xE7 ? 0x100 : 1;
+  return result;
+}
+static uint16_t key_counts(const BootReport &report) {
+  uint16_t result = 0;
+  for (auto key : report.keys) if (key > 3) result++;
+  for (unsigned i = 0; i < 8; i++) if (report.modifiers & (1u << i)) result += 0x100;
+  return result;
+}
+
 // Deliberately one keyboard interface, no Report ID and no vendor/media/mouse collections.
 static const uint8_t REPORT_DESCRIPTOR[] = {
     0x05, 0x01, 0x09, 0x06, 0xA1, 0x01, 0x05, 0x07,
@@ -61,6 +75,7 @@ void KVMUSBBridge::setup() {
   events_ = xQueueCreate(64, sizeof(Event));
   controls_ = xQueueCreate(32, sizeof(ControlRequest));
   if (events_ == nullptr || controls_ == nullptr) { mark_failed(); return; }
+  if (trace_key_counts_) count_traces_ = xQueueCreate(64, sizeof(CountTrace));
 
   // PHY0 (GPIO24/25) has its own 48MHz clock under the USJ clock gate.
   // FS OTG setup enables PHY1's clock only. Enable PHY0 before swapping.
@@ -264,15 +279,29 @@ void KVMUSBBridge::connected_(hid_host_device_handle_t handle, hid_host_driver_e
 }
 
 void KVMUSBBridge::interface_event_(hid_host_device_handle_t handle, hid_host_interface_event_t event, void *arg) {
-  auto *self = static_cast<KVMUSBBridge *>(arg);
+  auto *slot = static_cast<Slot *>(arg);
+  auto *self = slot->owner;
+  if (event == HID_HOST_INTERFACE_EVENT_INPUT_REPORT && !slot->keyboard.load()) {
+    // Reading the endpoint keeps the receiver's other interfaces serviced.
+    // Do not copy, parse, log or forward their mouse/vendor/media payloads.
+    self->auxiliary_reports_.fetch_add(1);
+    return;
+  }
   Event queued;
   queued.handle = handle;
   queued.type = event;
   queued.at_ms = millis();
+  if (event == HID_HOST_INTERFACE_EVENT_INPUT_REPORT) self->input_callbacks_.fetch_add(1);
   if (event == HID_HOST_INTERFACE_EVENT_INPUT_REPORT &&
       hid_host_device_get_raw_input_report_data(handle, queued.data, sizeof(queued.data), &queued.length) != ESP_OK) {
     self->rejected_.fetch_add(1);
     return;
+  }
+  if (event == HID_HOST_INTERFACE_EVENT_INPUT_REPORT) {
+    if (queued.length == 0) self->empty_input_.fetch_add(1);
+    else if (queued.length == 8) self->array_input_.fetch_add(1);
+    else if (queued.length == 19) self->bitmap_input_.fetch_add(1);
+    else self->other_input_.fetch_add(1);
   }
   // Reserve space for connection/disconnection events during an input burst.
   if (event == HID_HOST_INTERFACE_EVENT_INPUT_REPORT && uxQueueSpacesAvailable(self->events_) <= 16) {
@@ -289,24 +318,33 @@ void KVMUSBBridge::interface_event_(hid_host_device_handle_t handle, hid_host_in
 void KVMUSBBridge::open_keyboard_(hid_host_device_handle_t handle) {
   hid_host_dev_params_t params{};
   if (hid_host_device_get_params(handle, &params) != ESP_OK) return;
+  Slot *slot = nullptr;
+  for (auto &entry : slots_) if (entry.handle == nullptr) { slot = &entry; break; }
+  if (slot == nullptr) { ESP_LOGW(TAG, "No free HID interface slot"); return; }
+  slot->owner = this;
+  slot->keyboard.store(false);
+  slot->handle = handle;
   hid_host_device_config_t config{};
   config.callback = interface_event_;
-  config.callback_arg = this;
+  config.callback_arg = slot;
   esp_err_t error = hid_host_device_open(handle, &config);
   if (error != ESP_OK) {
+    slot->handle = nullptr;
     ESP_LOGW(TAG, "Cannot open HID interface %u: %s", params.iface_num, esp_err_to_name(error));
     return;
   }
   size_t length = 0;
   uint8_t *descriptor = hid_host_get_report_descriptor(handle, &length);
-  Slot *slot = nullptr;
-  for (auto &entry : slots_) if (entry.handle == nullptr) { slot = &entry; break; }
-  if (slot == nullptr || descriptor == nullptr || length > 2048 || !slot->descriptor.parse(descriptor, length)) {
+  const bool keyboard = descriptor != nullptr && length <= 2048 && slot->descriptor.parse(descriptor, length);
+  if (!keyboard && !drain_auxiliary_interfaces_) {
     ESP_LOGD(TAG, "Skipping non-keyboard/unsupported HID interface %u", params.iface_num);
     hid_host_device_close(handle);
+    slot->handle = nullptr;
+    slot->descriptor = KeyboardDescriptor{};
     return;
   }
-  if (dump_descriptors_) {
+  if (!keyboard) slot->descriptor = KeyboardDescriptor{};
+  if (dump_descriptors_ && descriptor != nullptr && length <= 2048) {
     // Static USB metadata only, never an input report or typed characters.
     ESP_LOGI(TAG, "HID-DESC-BEGIN interface=%u length=%u", params.iface_num, unsigned(length));
     for (size_t offset = 0; offset < length; offset += 24) {
@@ -317,28 +355,36 @@ void KVMUSBBridge::open_keyboard_(hid_host_device_handle_t handle) {
     }
   }
   // Parse the original descriptor, so both real 6KRO and bitmap NKRO inputs work.
-  if (params.sub_class == HID_SUBCLASS_BOOT_INTERFACE) {
+  if (keyboard && params.sub_class == HID_SUBCLASS_BOOT_INTERFACE) {
     error = hid_class_request_set_protocol(handle, HID_REPORT_PROTOCOL_REPORT);
     if (error != ESP_OK) {
-      ESP_LOGW(TAG, "Report protocol request failed on interface %u: %s", params.iface_num, esp_err_to_name(error));
+      ESP_LOGW(TAG, "Input protocol request failed on interface %u: %s", params.iface_num, esp_err_to_name(error));
       hid_host_device_close(handle);
+      slot->handle = nullptr;
+      slot->descriptor = KeyboardDescriptor{};
       return;
     }
   }
   slot->handle = handle;
-  slot->led_pending = true;
+  slot->keyboard.store(keyboard);
+  slot->interface_number = params.iface_num;
+  slot->trace_counts = 0xFFFF;
+  slot->trace_length = 0xFFFF;
+  slot->led_pending = keyboard;
   error = hid_host_device_start(handle);
   if (error != ESP_OK) {
     slot->handle = nullptr;
+    slot->keyboard.store(false);
     slot->descriptor = KeyboardDescriptor{};
     hid_host_device_close(handle);
     ESP_LOGW(TAG, "Cannot start keyboard interface: %s", esp_err_to_name(error));
     return;
   }
-  input_count_.fetch_add(1);
+  if (keyboard) input_count_.fetch_add(1);
+  else auxiliary_count_.fetch_add(1);
   hid_host_dev_info_t info{};
   hid_host_get_device_info(handle, &info);
-  ESP_LOGI(TAG, "Keyboard %04X:%04X interface %u, report layouts: %u", info.VID, info.PID,
+  ESP_LOGI(TAG, "%s %04X:%04X interface %u, report layouts: %u", keyboard ? "Keyboard" : "Auxiliary drain", info.VID, info.PID,
            params.iface_num, unsigned(slot->descriptor.layouts().size()));
 }
 
@@ -349,16 +395,24 @@ void KVMUSBBridge::handle_input_(const Event &queued) {
   for (auto &entry : slots_) if (entry.handle == handle) { slot = &entry; break; }
   if (slot == nullptr) return;
   if (event == HID_HOST_INTERFACE_EVENT_DISCONNECTED) {
+    const bool keyboard = slot->keyboard.exchange(false);
     slot->handle = nullptr;
     slot->descriptor = KeyboardDescriptor{};
-    input_count_.fetch_sub(1);
-    recover_output_("Keyboard interface disconnected; held keys released", true);
+    if (keyboard) {
+      input_count_.fetch_sub(1);
+      recover_output_("Keyboard interface disconnected; held keys released", true);
+    } else auxiliary_count_.fetch_sub(1);
     ControlRequest close;
     close.type = ControlType::CLOSE;
     close.handle = handle;
     queue_control_(close);
-    ESP_LOGI(TAG, "Keyboard interface disconnected; held keys released");
+    ESP_LOGI(TAG, "%s interface disconnected", keyboard ? "Keyboard" : "Auxiliary");
   } else if (event == HID_HOST_INTERFACE_EVENT_INPUT_REPORT) {
+    if (slot->trace_length != queued.length) {
+      slot->trace_length = queued.length;
+      trace_counts_(3, slot->interface_number, queued.length, queued.at_ms,
+                    input_callbacks_.load(), millis() - queued.at_ms, reports_.size());
+    }
     if (!report_is_fresh(millis(), queued.at_ms, input_boundary_valid_, input_boundary_ms_)) {
       stale_.fetch_add(1);
       if (!input_boundary_valid_ || int32_t(queued.at_ms - input_boundary_ms_) >= 0)
@@ -367,14 +421,23 @@ void KVMUSBBridge::handle_input_(const Event &queued) {
     }
     if (slot->descriptor.update(queued.data, queued.length)) {
       received_.fetch_add(1);
+      const uint32_t age = millis() - queued.at_ms;
+      if (age > max_input_age_ms_.load()) max_input_age_ms_.store(age);
+      const auto counts = key_counts(slot->descriptor.state());
+      if (counts != slot->trace_counts) {
+        slot->trace_counts = counts;
+        trace_counts_(0, slot->interface_number, counts, queued.at_ms, received_.load(), age, reports_.size());
+      }
       recompute_(true);
     }
     else if (queued.length != 0) rejected_.fetch_add(1);
   } else if (event == HID_HOST_INTERFACE_EVENT_TRANSFER_ERROR) {
     slot->descriptor.clear_state();
-    recover_output_("Keyboard transfer error; restarting input endpoint", true);
-    rejected_.fetch_add(1);
-    input_errors_.fetch_add(1);
+    if (slot->keyboard.load()) {
+      recover_output_("Keyboard transfer error; restarting input endpoint", true);
+      rejected_.fetch_add(1);
+      input_errors_.fetch_add(1);
+    } else auxiliary_errors_.fetch_add(1);
     // The IDF driver does NOT resubmit its interrupt transfer on this event.
     ControlRequest restart;
     restart.type = ControlType::RESTART;
@@ -385,8 +448,10 @@ void KVMUSBBridge::handle_input_(const Event &queued) {
 
 void KVMUSBBridge::recompute_(bool fresh_physical_report) {
   KeyState state;
-  for (const auto &slot : slots_) if (slot.handle != nullptr) state.merge(slot.descriptor.state());
+  for (const auto &slot : slots_) if (slot.handle != nullptr && slot.keyboard.load()) state.merge(slot.descriptor.state());
+  input_counts_.store(key_counts(state));
   release_gate_.observe(state, fresh_physical_report);
+  waiting_for_release_.store(release_gate_.waiting());
   if (!release_gate_.waiting() && switch_hotkey_.observe(state, millis())) {
     // Drop unsent physical key states. The first macro packet releases the old
     // PC; the chord itself never reaches either desktop shortcut listener.
@@ -395,6 +460,12 @@ void KVMUSBBridge::recompute_(bool fresh_physical_report) {
     ESP_LOGI(TAG, "Ctrl+Alt+/ consumed: requesting next KVM input");
   }
   const BootReport report = release_gate_.waiting() ? BootReport{} : switch_hotkey_.filtered_report(state);
+  const auto counts = key_counts(report);
+  desired_counts_.store(counts);
+  if (counts != traced_desired_counts_) {
+    traced_desired_counts_ = counts;
+    trace_counts_(1, release_gate_.waiting() ? 1 : 0, counts, millis(), received_.load(), 0, reports_.size());
+  }
   portENTER_CRITICAL(&state_mux_);
   desired_ = report;
   portEXIT_CRITICAL(&state_mux_);
@@ -482,13 +553,19 @@ void KVMUSBBridge::service_output_() {
   if (reports_.empty() && idle != 0 && uint32_t(now - last_send_ms_) >= uint32_t(idle) * 4) {
     reports_.push(current_report(), now);
   }
-  if (!reports_.empty() && send_report_(reports_.front())) reports_.pop();
+  if (!reports_.empty()) {
+    if (reports_.size() > max_output_depth_.load()) max_output_depth_.store(reports_.size());
+    const auto age = reports_.age(now);
+    if (age > max_output_wait_ms_.load()) max_output_wait_ms_.store(age);
+    if (send_report_(reports_.front())) reports_.pop();
+  }
 }
 
 bool KVMUSBBridge::send_report_(const BootReport &report) {
   // Wait for our completion callback, not only TinyUSB's endpoint busy flag:
   // its task can clear the latter before our callback runs on another core.
   if (report_in_flight_.load() || !tud_hid_ready()) return false;
+  submitted_at_ms_.store(millis());
   report_in_flight_.store(true);
   if (!tud_hid_report(0, &report, sizeof(report))) {
     report_in_flight_.store(false);
@@ -496,6 +573,32 @@ bool KVMUSBBridge::send_report_(const BootReport &report) {
   }
   last_send_ms_ = millis();
   return true;
+}
+
+void KVMUSBBridge::report_delivered(const uint8_t *data, uint16_t length) {
+  const uint32_t now = millis();
+  const uint32_t age = now - submitted_at_ms_.load();
+  if (age > max_ack_ms_.load()) max_ack_ms_.store(age);
+  const uint32_t sequence = delivered_.fetch_add(1) + 1;
+  if (data != nullptr && length == sizeof(BootReport)) {
+    BootReport report;
+    std::memcpy(&report, data, sizeof(report));
+    const auto counts = key_counts(report);
+    acked_counts_.store(counts);
+    if (traced_ack_counts_.exchange(counts) != counts)
+      trace_counts_(2, 0, counts, now, sequence, age, 0);
+  }
+  // Publish completion only after reading TinyUSB's report buffer.
+  report_in_flight_.store(false);
+}
+
+void KVMUSBBridge::trace_counts_(uint8_t stage, uint8_t source, uint16_t counts,
+                                uint32_t at, uint32_t sequence, uint32_t age, uint8_t queued) {
+  // Optional diagnostics stop automatically after five minutes. Queueing a trace
+  // never blocks either USB task; printing happens in the ESPHome main loop.
+  if (count_traces_ == nullptr || millis() > 300000) return;
+  const CountTrace trace{at, sequence, age, counts, stage, source, queued};
+  if (xQueueSend(count_traces_, &trace, 0) != pdPASS) trace_drops_.fetch_add(1);
 }
 
 void KVMUSBBridge::abort_switch_(const char *reason) {
@@ -507,6 +610,7 @@ void KVMUSBBridge::abort_switch_(const char *reason) {
 void KVMUSBBridge::recover_output_(const char *reason, bool clear_inputs) {
   abort_switch_(reason);
   release_gate_.arm();
+  waiting_for_release_.store(true);
   input_boundary_valid_ = true;
   input_boundary_ms_ = millis();
   if (clear_inputs) for (auto &slot : slots_) slot.descriptor.clear_state();
@@ -514,6 +618,7 @@ void KVMUSBBridge::recover_output_(const char *reason, bool clear_inputs) {
   last_enqueued_ = BootReport{};
   portENTER_CRITICAL(&state_mux_);
   desired_ = BootReport{};
+  desired_counts_.store(0);
   portEXIT_CRITICAL(&state_mux_);
   recoveries_.fetch_add(1);
   ESP_LOGW(TAG, "%s", reason);
@@ -585,6 +690,20 @@ void KVMUSBBridge::dump_config() {
 }
 
 void KVMUSBBridge::loop() {
+  if (count_traces_ != nullptr) {
+    CountTrace trace;
+    for (unsigned i = 0; i < 16 && xQueueReceive(count_traces_, &trace, 0) == pdPASS; i++) {
+      if (trace.stage == 3) {
+        ESP_LOGI(TAG, "INPUT LENGTH t=%u interface=%u bytes=%u age=%ums", unsigned(trace.at_ms),
+                 trace.source, trace.counts, unsigned(trace.age_ms));
+        continue;
+      }
+      const char *stage = trace.stage == 0 ? "INPUT" : trace.stage == 1 ? "DESIRED" : "ACK";
+      ESP_LOGI(TAG, "COUNT %s t=%u seq=%u source=%u held=%u mods=%u age=%ums queued=%u",
+               stage, unsigned(trace.at_ms), unsigned(trace.sequence), trace.source,
+               trace.counts & 0xFF, trace.counts >> 8, unsigned(trace.age_ms), trace.queued);
+    }
+  }
   if (worker_failed_.exchange(false)) {
     status_set_error(LOG_STR("USB worker stopped; check UART diagnostics"));
     mounted_.store(false);
@@ -597,6 +716,15 @@ void KVMUSBBridge::loop() {
     ESP_LOGD(TAG, "USB health: queued=%u in-flight-age=%ums recoveries=%u stale=%u input-errors=%u control-errors=%u max-control=%ums max-worker-gap=%ums",
              queued_output_.load(), in_flight_age_ms_.load(), recoveries_.load(), stale_.load(),
              input_errors_.load(), control_errors_.load(), max_control_ms_.load(), max_worker_gap_ms_.load());
+    ESP_LOGD(TAG, "Key counts: input=%u/%u desired=%u/%u acked=%u/%u gate=%u; maxima: input-age=%ums queue=%u wait=%ums ACK=%ums trace-drops=%u",
+             input_counts_.load() & 0xFF, input_counts_.load() >> 8,
+             desired_counts_.load() & 0xFF, desired_counts_.load() >> 8,
+             acked_counts_.load() & 0xFF, acked_counts_.load() >> 8, waiting_for_release_.load(),
+             max_input_age_ms_.load(), max_output_depth_.load(), max_output_wait_ms_.load(), max_ack_ms_.load(), trace_drops_.load());
+    ESP_LOGD(TAG, "Input packets: callbacks=%u empty=%u bytes8=%u bytes19=%u other=%u",
+             input_callbacks_.load(), empty_input_.load(), array_input_.load(), bitmap_input_.load(), other_input_.load());
+    ESP_LOGD(TAG, "Auxiliary drain: interfaces=%u reports=%u errors=%u", auxiliary_count_.load(),
+             auxiliary_reports_.load(), auxiliary_errors_.load());
     ESP_LOGD(TAG, "USB state: HS root=%08X FS config=%08X status=%08X control=%08X PHY-swap=%u",
              host_enabled_ ? unsigned(USB_DWC_HS.hprt_reg.val) : 0u, unsigned(USB_DWC_FS.dcfg_reg.val),
              unsigned(USB_DWC_FS.dsts_reg.val), unsigned(USB_DWC_FS.dctl_reg.val),
@@ -656,9 +784,9 @@ void tud_hid_set_protocol_cb(uint8_t instance, uint8_t protocol) {
   ESP_LOGI("kvm_usb_bridge", "Host selected %s protocol (interface %u)", protocol == 0 ? "boot" : "report", instance);
 }
 
-void tud_hid_report_complete_cb(uint8_t instance, uint8_t const *, uint16_t) {
+void tud_hid_report_complete_cb(uint8_t instance, uint8_t const *report, uint16_t length) {
   using namespace esphome::kvm_usb_bridge;
-  if (bridge_instance != nullptr && instance == 0) bridge_instance->report_delivered();
+  if (bridge_instance != nullptr && instance == 0) bridge_instance->report_delivered(report, length);
 }
 
 void tud_hid_report_failed_cb(uint8_t instance, hid_report_type_t type, uint8_t const *, uint16_t) {

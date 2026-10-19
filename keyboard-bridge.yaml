@@ -26,6 +26,7 @@ kvm_usb_bridge:
   # Optional TESmart shortcut: simultaneous Ctrl+Alt+/ becomes
   # RightCtrl tap -> RightCtrl tap -> PageDown tap (next input).
   switch_hotkey: false
+  drain_auxiliary_interfaces: true
 
 logger:
   hardware_uart: UART0

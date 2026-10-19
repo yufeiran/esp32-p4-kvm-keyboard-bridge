@@ -29,6 +29,12 @@ Current source discards transitions older than 100 ms, clears old queues on susp
 
 **Prebuilt version:** the v0.1.0 binary below predates these recovery changes. Build current source for the fixes; the old binary remains a versioned initial-test artifact.
 
+### Wireless reconnection follow-up (2026-10-19)
+
+A keyboard power cycle with its receiver left on P4 reproduced stuck Backspace; the same test directly on the PC passed. The current example enables `drain_auxiliary_interfaces: true`: non-keyboard HID interfaces stay open and are polled, while their payloads are discarded without copying them into the keyboard queue or forwarding them. Keyboard Report Protocol and the KVM-facing 8-byte format stay unchanged.
+
+The integrated firmware passed **three keyboard-off/on and held-Backspace release cycles**, bidirectional switching and post-switch typing. This is an improvement on a captured trigger, not an overnight stability claim or proof of the exact receiver/host mechanism. The original v0.1.0 binary also predates this change. See [evidence and diagnostics](docs/reliability.md).
+
 ## 2. How it works
 
 P4 acts as two different USB participants at once:
