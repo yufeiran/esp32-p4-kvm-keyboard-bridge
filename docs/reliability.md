@@ -34,3 +34,7 @@ The `firmware/` binary is still the initial **v0.1.0** standalone image and does
 The updated core was tested in the integrated firmware: ordinary typing, intentional hold/release, bidirectional Ctrl+Alt+/ switching, output unplug/replug with input during disconnection, and a separate Windows Notepad Backspace test passed. Logs showed suspend -> attach, no output backlog, zero new overflows and no transfer/control errors. The source-only standalone configuration also compiled and passed its linked-descriptor audit; its newly built image was not flashed in this update. See [the test record](reliability-test-results.txt).
 
 修复核心已在集成固件实测：普通输入、正常长按与松开、双向热键切换、输出线断开期间按键后重连，以及 Windows 记事本中的退格对照均正常。日志捕获到休眠后重新连接，没有旧输入积压、新溢出或传输错误。独立配置也已编译并通过描述符检查，但本次没有再次刷入独立镜像；不能把它写成新增独立固件实机验证。整夜闲置验证仍待完成。
+
+Receiver-side hotplug was also tested twice: both interfaces returned and input/Backspace recovered each time. Physical removal produced low-level invalid-state URB/endpoint logs, followed by successful cleanup/re-enumeration; component error/overflow counters stayed zero. The final recovery count of seven is fully accounted for by startup and the deliberate output/receiver tests.
+
+接收器端也进行了两次拔插：每次两个接口都重新建立，输入与退格恢复正常。物理拔下瞬间出现过底层 URB／端点 invalid-state 日志，之后清理和重新枚举成功，组件错误／溢出计数仍为零。最终七次恢复均对应启动及人为拔插测试，短测期间没有无法解释的自动恢复。

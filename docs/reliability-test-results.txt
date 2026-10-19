@@ -39,3 +39,16 @@ Waited for Boot seems successful; no eFuses were programmed and no NVS erase was
 Not yet verified: an overnight idle soak, every host sleep condition, deliberate host
 transfer-error injection or physical fault injection of the output-stall reconnect path.
 The precise cause of the earlier long-idle incident remains unproven.
+
+Receiver-side regression:
+Tester unplugged the receiver for about five seconds and reinserted it twice;
+both keyboard interfaces re-enumerated each time and Notepad input/Backspace worked.
+The driver emitted invalid-state URB/endpoint messages at physical removal;
+cleanup completed and automatic reconnection succeeded. This is not a claim that
+every driver failure is recoverable.
+Final recovery count 7 = initial attach (1), deliberate output suspend/attach (2),
+and two deliberate receiver removals with two interfaces each (4).
+Post-test: 2 input interfaces, output connected, no queued/in-flight report,
+zero component input/control errors and queue overflows; max control duration 1ms,
+maximum forwarding worker gap 28ms. No unexplained recovery occurred in this short test.
+Overnight idle validation remains pending.
