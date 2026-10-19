@@ -22,3 +22,7 @@ Repository: https://github.com/yufeiran/esp32-p4-kvm-keyboard-bridge
 - Optional simultaneous Ctrl+Alt+/ becomes sequential RightCtrl, RightCtrl, PageDown with releases and completion checks. This assumes the KVM's default RightCtrl trigger.
 - No eFuses are written. The runtime PHY/pull-up/pad fix handles the tested board's native USB-C routing and restart behavior.
 - Do not infer compatibility for other keyboards or KVMs from one tested combination. Read firmware/manifest.json for the standalone image's actual validation status.
+
+## Current reliability status
+
+Long-idle unresponsiveness and repeated input were reported for the initial firmware. Current source adds suspend/reset queue discard, 100ms transition aging, release gating, stalled-output re-enumeration and a separate HID control task. The v0.1.0 prebuilt image does not include these fixes. Read docs/reliability.md; overnight idle stability is not yet established.

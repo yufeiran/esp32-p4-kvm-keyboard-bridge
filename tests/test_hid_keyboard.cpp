@@ -1,5 +1,6 @@
 #include "components/kvm_usb_bridge/hid_keyboard.h"
 #include "components/kvm_usb_bridge/switch_hotkey.h"
+#include "components/kvm_usb_bridge/report_buffer.h"
 #include "fixtures/nuphy_air75_v3_receiver.h"
 #include <cassert>
 #include <iostream>
@@ -211,4 +212,53 @@ int main() {
   failure.observe(KeyState{}, 4300);
   assert(failure.filtered_report(letter).keys[0] == 4);
   std::cout << "PASS timeout/abort without replay, timer wrap, and release before sequence completion\n";
+
+  ReportBuffer transport;
+  BootReport a_down;
+  a_down.keys[0] = 4;
+  assert(transport.push(a_down, 10));
+  assert(transport.push(BootReport{}, 11));
+  assert(!transport.stale(110));
+  assert(transport.stale(111));
+  // Simulate a host that stops polling, then wakes: the entire old burst is
+  // replaced with a release, never a delayed series of a key presses.
+  transport.release(2000);
+  assert(transport.size() == 1 && transport.front() == BootReport{});
+  transport.pop();
+  assert(transport.empty());
+  for (unsigned i = 0; i < 1000; i++) {
+    assert(transport.push(i % 2 ? BootReport{} : a_down, 3000 + i));
+    assert(transport.front() == (i % 2 ? BootReport{} : a_down));
+    transport.pop();
+  }
+  assert(transport.empty());
+  for (unsigned i = 0; i < ReportBuffer::CAPACITY; i++) assert(transport.push(a_down, 5000));
+  assert(!transport.push(a_down, 5001));
+  assert(transport.size() == 1 && transport.front() == BootReport{});
+  transport.clear();
+  assert(transport.push(a_down, 0xFFFFFFF0u));
+  assert(!transport.stale(0x20u));
+  assert(transport.stale(0x80u));
+  transport.pop();
+  // A legitimately held key has no undelivered transition after its press was
+  // ACKed; it is not forcibly released just because 100ms elapsed.
+  assert(transport.empty() && !transport.stale(0x8000u));
+  std::cout << "PASS bounded transition queue, FIFO wrap, release-only overflow, stale-wake discard and held keys\n";
+
+  ReleaseGate gate;
+  assert(!gate.waiting());
+  gate.arm();
+  gate.observe(KeyState{}, false); // Synthetic clearing is not a physical release.
+  assert(gate.waiting());
+  gate.observe(letter, true);
+  assert(gate.waiting());
+  gate.observe(KeyState{}, true);
+  assert(!gate.waiting());
+  assert(report_is_fresh(1000, 950, false, 0));
+  assert(!report_is_fresh(1000, 899, false, 0));
+  assert(!report_is_fresh(1000, 999, true, 1000));
+  assert(report_is_fresh(1000, 1000, true, 1000));
+  assert(report_is_fresh(0x20, 0xFFFFFFF0u, true, 0xFFFFFFE0u));
+  assert(!report_is_fresh(0x20, 0xFFFFFFF0u, true, 0x10u));
+  std::cout << "PASS fresh-release gate, suspend/reset boundary, stale input and millisecond wrap\n";
 }

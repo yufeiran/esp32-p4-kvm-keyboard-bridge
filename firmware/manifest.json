@@ -23,5 +23,9 @@
     "Optional hotkey hardware tests used the same core in an integrated configuration;",
     "tester confirmed both switching directions, normal post-switch input and one switch per hold.",
     "No raw typed keyboard reports or characters were recorded."
+  ],
+  "source_ref": "v0.1.0",
+  "known_issues": [
+    "This initial binary predates the 2026-10-19 long-idle/suspend/backlog recovery fixes. Build current source for those changes."
   ]
 }

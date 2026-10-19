@@ -58,9 +58,9 @@ static const char *STRINGS[] = {"\x09\x04", "P4 Keyboard Bridge", "KVM Boot Keyb
 
 void KVMUSBBridge::setup() {
   bridge_instance = this;
-  reports_ = xQueueCreate(64, sizeof(BootReport));
   events_ = xQueueCreate(64, sizeof(Event));
-  if (reports_ == nullptr || events_ == nullptr) { mark_failed(); return; }
+  controls_ = xQueueCreate(32, sizeof(ControlRequest));
+  if (events_ == nullptr || controls_ == nullptr) { mark_failed(); return; }
 
   // PHY0 (GPIO24/25) has its own 48MHz clock under the USJ clock gate.
   // FS OTG setup enables PHY1's clock only. Enable PHY0 before swapping.
@@ -101,6 +101,10 @@ void KVMUSBBridge::setup() {
   device.descriptor.string = STRINGS;
   device.descriptor.string_count = 3;
   device.descriptor.full_speed_config = CONFIG_DESCRIPTOR;
+  device.event_cb = [](tinyusb_event_t *event, void *arg) {
+    static_cast<KVMUSBBridge *>(arg)->output_event_(uint8_t(event->id));
+  };
+  device.event_arg = this;
   esp_err_t error = tinyusb_driver_install(&device);
   if (error != ESP_OK) {
     ESP_LOGE(TAG, "FS keyboard initialization failed: %s", esp_err_to_name(error));
@@ -155,7 +159,8 @@ void KVMUSBBridge::setup() {
     return;
   }
   }
-  if (xTaskCreate(bridge_task_, "kvm_usb_bridge", 8192, this, 5, nullptr) != pdPASS) {
+  if (xTaskCreate(control_task_, "kvm_usb_ctrl", 4096, this, 4, nullptr) != pdPASS ||
+      xTaskCreate(bridge_task_, "kvm_usb_bridge", 8192, this, 5, nullptr) != pdPASS) {
     mark_failed(); return;
   }
   ESP_LOGI(TAG, "Ready: USB-A direct host -> FS boot keyboard on native USB-C (GPIO24/25)");
@@ -178,20 +183,25 @@ void KVMUSBBridge::host_daemon_(void *arg) {
 void KVMUSBBridge::bridge_task_(void *arg) {
   auto *self = static_cast<KVMUSBBridge *>(arg);
   while (self->running_.load()) {
+    const uint32_t now = millis();
+    const uint32_t gap = self->last_worker_ms_ == 0 ? 0 : now - self->last_worker_ms_;
+    self->last_worker_ms_ = now;
+    if (gap > self->max_worker_gap_ms_.load()) self->max_worker_gap_ms_.store(gap);
+    if (gap > MAX_REPORT_AGE_MS) self->recover_output_("USB worker delayed; old transitions discarded", true);
+    self->service_output_();
     // Blocking HID control requests must run outside the driver's event task.
     // Copy each input report in its callback; fetching "latest" here loses edges.
     Event event;
     const bool overflow = self->input_overflow_.exchange(false);
+    if (overflow) self->recover_output_("Input queue overflow; release-only recovery", true);
     for (unsigned count = 0; count < 64 && xQueueReceive(self->events_, &event, 0) == pdPASS; count++) {
       if (event.connected) self->open_keyboard_(event.handle);
       else if (!overflow || event.type != HID_HOST_INTERFACE_EVENT_INPUT_REPORT) self->handle_input_(event);
     }
-    if (overflow) {
-      for (auto &slot : self->slots_) slot.descriptor.clear_state();
-      self->recompute_();
-    }
     self->service_output_();
     self->service_leds_();
+    self->queued_output_.store(self->reports_.size());
+    self->in_flight_age_ms_.store(self->report_in_flight_.load() ? millis() - self->last_send_ms_ : 0);
     vTaskDelay(pdMS_TO_TICKS(1));
   }
   // Best effort release if a worker fails; leave the ESPHome runtime alive for diagnostics.
@@ -200,6 +210,45 @@ void KVMUSBBridge::bridge_task_(void *arg) {
     tud_hid_report(0, &empty, sizeof(empty));
   }
   vTaskDelete(nullptr);
+}
+
+void KVMUSBBridge::control_task_(void *arg) {
+  auto *self = static_cast<KVMUSBBridge *>(arg);
+  while (self->running_.load()) {
+    ControlRequest request;
+    if (xQueueReceive(self->controls_, &request, pdMS_TO_TICKS(100)) != pdPASS) continue;
+    const uint32_t started = millis();
+    esp_err_t error;
+    if (request.type == ControlType::LED) {
+      error = hid_class_request_set_report(request.handle, HOST_HID_REPORT_TYPE_OUTPUT,
+                                           request.report_id, request.data, request.length);
+    } else if (request.type == ControlType::CLOSE) {
+      error = hid_host_device_close(request.handle);
+    } else {
+      error = hid_host_device_stop(request.handle);
+      if (error == ESP_OK) error = hid_host_device_start(request.handle);
+    }
+    const uint32_t elapsed = millis() - started;
+    if (elapsed > self->max_control_ms_.load()) self->max_control_ms_.store(elapsed);
+    if (error != ESP_OK) {
+      self->control_errors_.fetch_add(1);
+      ESP_LOGW(TAG, "HID control operation %u failed after %ums: %s", unsigned(request.type), unsigned(elapsed), esp_err_to_name(error));
+    } else if (elapsed > MAX_REPORT_AGE_MS) {
+      ESP_LOGW(TAG, "HID control operation %u took %ums; key forwarding remained independent", unsigned(request.type), unsigned(elapsed));
+    }
+  }
+  vTaskDelete(nullptr);
+}
+
+void KVMUSBBridge::queue_control_(const ControlRequest &request) {
+  if (xQueueSend(controls_, &request, 0) == pdPASS) return;
+  control_errors_.fetch_add(1);
+  ESP_LOGW(TAG, "HID control queue full (operation %u)", unsigned(request.type));
+  // LED requests are optional. Cleanup must remain serialized with any LED
+  // transfer using the same handle; never close it concurrently as a fallback.
+  // Half the queue is reserved for critical requests, so this wait is only
+  // possible in a device/error storm. Input timestamps prevent delayed replay.
+  if (request.type != ControlType::LED) xQueueSend(controls_, &request, portMAX_DELAY);
 }
 
 void KVMUSBBridge::connected_(hid_host_device_handle_t handle, hid_host_driver_event_t event, void *arg) {
@@ -219,6 +268,7 @@ void KVMUSBBridge::interface_event_(hid_host_device_handle_t handle, hid_host_in
   Event queued;
   queued.handle = handle;
   queued.type = event;
+  queued.at_ms = millis();
   if (event == HID_HOST_INTERFACE_EVENT_INPUT_REPORT &&
       hid_host_device_get_raw_input_report_data(handle, queued.data, sizeof(queued.data), &queued.length) != ESP_OK) {
     self->rejected_.fetch_add(1);
@@ -302,50 +352,57 @@ void KVMUSBBridge::handle_input_(const Event &queued) {
     slot->handle = nullptr;
     slot->descriptor = KeyboardDescriptor{};
     input_count_.fetch_sub(1);
-    recompute_();
-    hid_host_device_close(handle);
+    recover_output_("Keyboard interface disconnected; held keys released", true);
+    ControlRequest close;
+    close.type = ControlType::CLOSE;
+    close.handle = handle;
+    queue_control_(close);
     ESP_LOGI(TAG, "Keyboard interface disconnected; held keys released");
   } else if (event == HID_HOST_INTERFACE_EVENT_INPUT_REPORT) {
+    if (!report_is_fresh(millis(), queued.at_ms, input_boundary_valid_, input_boundary_ms_)) {
+      stale_.fetch_add(1);
+      if (!input_boundary_valid_ || int32_t(queued.at_ms - input_boundary_ms_) >= 0)
+        recover_output_("Expired input transition; release-only recovery", true);
+      return;
+    }
     if (slot->descriptor.update(queued.data, queued.length)) {
       received_.fetch_add(1);
-      recompute_();
+      recompute_(true);
     }
     else if (queued.length != 0) rejected_.fetch_add(1);
   } else if (event == HID_HOST_INTERFACE_EVENT_TRANSFER_ERROR) {
-    slot->descriptor = KeyboardDescriptor{};
-    recompute_();
+    slot->descriptor.clear_state();
+    recover_output_("Keyboard transfer error; restarting input endpoint", true);
     rejected_.fetch_add(1);
-    // A descriptor is retained by the driver; recover parsing without retaining held keys.
-    size_t length = 0;
-    auto *descriptor = hid_host_get_report_descriptor(handle, &length);
-    if (descriptor != nullptr) slot->descriptor.parse(descriptor, length);
-    ESP_LOGW(TAG, "Keyboard input transfer error; held state cleared");
+    input_errors_.fetch_add(1);
+    // The IDF driver does NOT resubmit its interrupt transfer on this event.
+    ControlRequest restart;
+    restart.type = ControlType::RESTART;
+    restart.handle = handle;
+    queue_control_(restart);
   }
 }
 
-void KVMUSBBridge::recompute_() {
+void KVMUSBBridge::recompute_(bool fresh_physical_report) {
   KeyState state;
   for (const auto &slot : slots_) if (slot.handle != nullptr) state.merge(slot.descriptor.state());
-  if (switch_hotkey_.observe(state, millis())) {
+  release_gate_.observe(state, fresh_physical_report);
+  if (!release_gate_.waiting() && switch_hotkey_.observe(state, millis())) {
     // Drop unsent physical key states. The first macro packet releases the old
     // PC; the chord itself never reaches either desktop shortcut listener.
-    xQueueReset(reports_);
-    pending_valid_ = false;
+    reports_.clear();
     last_enqueued_ = BootReport{};
     ESP_LOGI(TAG, "Ctrl+Alt+/ consumed: requesting next KVM input");
   }
-  const BootReport report = switch_hotkey_.filtered_report(state);
+  const BootReport report = release_gate_.waiting() ? BootReport{} : switch_hotkey_.filtered_report(state);
   portENTER_CRITICAL(&state_mux_);
   desired_ = report;
   portEXIT_CRITICAL(&state_mux_);
   if (report == last_enqueued_) return;
   last_enqueued_ = report;
-  if (xQueueSend(reports_, &report, 0) != pdPASS) {
+  if (!reports_.push(report, millis())) {
     overflows_.fetch_add(1);
-    xQueueReset(reports_);
-    BootReport empty;
-    xQueueSend(reports_, &empty, 0);
-    xQueueSend(reports_, &report, 0);
+    recover_output_("Output queue overflow; release-only recovery", true);
   }
 }
 
@@ -357,40 +414,59 @@ BootReport KVMUSBBridge::current_report() {
 }
 
 void KVMUSBBridge::service_output_() {
-  const bool mounted = tud_mounted();
-  mounted_.store(mounted);
-  if (!mounted) {
-    abort_switch_("USB output disconnected; shortcut will not be replayed");
+  const uint32_t now = millis();
+  const uint32_t revision = output_revision_.load();
+  const bool changed = revision != seen_output_revision_;
+  if (changed) {
+    seen_output_revision_ = revision;
+    recover_output_("KVM USB lifecycle changed; stale keys and shortcut discarded");
     was_mounted_ = false;
-    pending_valid_ = false;
-    report_in_flight_.store(false);
-    xQueueReset(reports_);
+  }
+  if (detached_for_recovery_) {
+    if (uint32_t(now - detach_started_ms_) >= 1000) {
+      usb_serial_jtag_ll_phy_enable_pad(true);
+      usb_serial_jtag_pull_override_vals_t pulls{};
+      pulls.dp_pu = true;
+      usb_serial_jtag_ll_phy_enable_pull_override(&pulls);
+      usb_serial_jtag_ll_phy_disable_pull_override();
+      tud_connect();
+      detached_for_recovery_ = false;
+      ESP_LOGI(TAG, "KVM keyboard output reattached after transfer stall");
+    }
+    mounted_.store(false);
+    return;
+  }
+  const bool ready = tud_mounted() && !tud_suspended() && !awaiting_output_mount_.load();
+  mounted_.store(ready);
+  if (!ready) {
+    if (was_mounted_) recover_output_("KVM USB unavailable; old transitions discarded");
+    was_mounted_ = false;
+    reports_.clear();
+    release_gate_.arm();
     return;
   }
   if (!was_mounted_) {
+    if (!changed) recover_output_("KVM USB ready; synchronizing released state");
     was_mounted_ = true;
-    report_in_flight_.store(false);
-    xQueueReset(reports_);
-    pending_ = BootReport{};
-    pending_valid_ = true;
-    const BootReport current = current_report();
-    xQueueSend(reports_, &current, 0);
-    last_enqueued_ = current;
     led_revision_.fetch_add(1);
   }
   if (output_failed_.exchange(false)) {
-    abort_switch_("USB report failed; shortcut canceled");
-    xQueueReset(reports_);
-    pending_ = BootReport{};
-    pending_valid_ = true;
-    const BootReport current = current_report();
-    xQueueSend(reports_, &current, 0);
-    last_enqueued_ = current;
+    recover_output_("KVM USB report failed; release-only recovery");
+  }
+  // A lost completion used to leave report_in_flight_ set forever, including
+  // across a bus reset that completed between two worker iterations.
+  if (report_in_flight_.load() && uint32_t(now - last_send_ms_) > 1000 &&
+      (!have_reconnected_ || uint32_t(now - last_reconnect_ms_) >= 30000)) {
+    reconnect_output_();
+    return;
+  }
+  if (reports_.stale(now)) {
+    stale_.fetch_add(reports_.size());
+    recover_output_("KVM stopped draining reports; expired backlog discarded", true);
   }
   if (switch_hotkey_.active()) {
-    const uint32_t now = millis();
     if (switch_hotkey_.timed_out(now)) {
-      abort_switch_("USB hotkey sequence timed out; shortcut will not be replayed");
+      recover_output_("USB hotkey sequence timed out; shortcut will not be replayed");
     } else {
       if (switch_hotkey_.waiting_for_ack() && !report_in_flight_.load() && switch_hotkey_.acknowledge(now)) {
         ESP_LOGI(TAG, "KVM next-input hotkey sequence delivered");
@@ -401,16 +477,12 @@ void KVMUSBBridge::service_output_() {
       return;
     }
   }
-  if (!pending_valid_) pending_valid_ = xQueueReceive(reports_, &pending_, 0) == pdPASS;
   // Respect SET_IDLE in units of 4ms, even when no key changes.
   const uint8_t idle = idle_rate_.load();
-  if (!pending_valid_ && idle != 0 && millis() - last_send_ms_ >= uint32_t(idle) * 4) {
-    pending_ = current_report();
-    pending_valid_ = true;
+  if (reports_.empty() && idle != 0 && uint32_t(now - last_send_ms_) >= uint32_t(idle) * 4) {
+    reports_.push(current_report(), now);
   }
-  if (pending_valid_ && send_report_(pending_)) {
-    pending_valid_ = false;
-  }
+  if (!reports_.empty() && send_report_(reports_.front())) reports_.pop();
 }
 
 bool KVMUSBBridge::send_report_(const BootReport &report) {
@@ -429,12 +501,51 @@ bool KVMUSBBridge::send_report_(const BootReport &report) {
 void KVMUSBBridge::abort_switch_(const char *reason) {
   if (!switch_hotkey_.active()) return;
   switch_hotkey_.abort();
-  xQueueReset(reports_);
-  pending_ = BootReport{};
-  pending_valid_ = true;
-  last_enqueued_ = BootReport{};
-  recompute_();
   ESP_LOGW(TAG, "%s", reason);
+}
+
+void KVMUSBBridge::recover_output_(const char *reason, bool clear_inputs) {
+  abort_switch_(reason);
+  release_gate_.arm();
+  input_boundary_valid_ = true;
+  input_boundary_ms_ = millis();
+  if (clear_inputs) for (auto &slot : slots_) slot.descriptor.clear_state();
+  reports_.release(input_boundary_ms_);
+  last_enqueued_ = BootReport{};
+  portENTER_CRITICAL(&state_mux_);
+  desired_ = BootReport{};
+  portEXIT_CRITICAL(&state_mux_);
+  recoveries_.fetch_add(1);
+  ESP_LOGW(TAG, "%s", reason);
+}
+
+void KVMUSBBridge::output_event_(uint8_t event) {
+  // Called in the TinyUSB task, in order with report-completion callbacks.
+  // Mount is an epoch even when the worker never observed mounted == false.
+  if (event == TINYUSB_EVENT_ATTACHED || event == TINYUSB_EVENT_DETACHED) {
+    report_in_flight_.store(false);
+    output_failed_.store(false);
+  }
+  if (event == TINYUSB_EVENT_ATTACHED) awaiting_output_mount_.store(false);
+  output_revision_.fetch_add(1);
+  const char *name = event == TINYUSB_EVENT_ATTACHED ? "attached" :
+                     event == TINYUSB_EVENT_DETACHED ? "detached" :
+                     event == TINYUSB_EVENT_SUSPENDED ? "suspended" : "resumed";
+  ESP_LOGI(TAG, "KVM USB %s (epoch %u)", name, unsigned(output_revision_.load()));
+}
+
+void KVMUSBBridge::reconnect_output_() {
+  recover_output_("KVM IN transfer stalled >1000ms; forcing keyboard re-enumeration", true);
+  last_reconnect_ms_ = millis();
+  have_reconnected_ = true;
+  awaiting_output_mount_.store(true);
+  tud_disconnect();
+  usb_serial_jtag_pull_override_vals_t pulls{};
+  usb_serial_jtag_ll_phy_enable_pull_override(&pulls);
+  usb_serial_jtag_ll_phy_enable_pad(false);
+  detach_started_ms_ = millis();
+  detached_for_recovery_ = true;
+  was_mounted_ = false;
 }
 
 void KVMUSBBridge::service_leds_() {
@@ -449,9 +560,20 @@ void KVMUSBBridge::service_leds_() {
     for (const auto &layout : slot.descriptor.layouts()) {
       auto report = slot.descriptor.led_report(layout, leds_.load());
       if (report.empty()) continue;
-      const esp_err_t error = hid_class_request_set_report(slot.handle, HOST_HID_REPORT_TYPE_OUTPUT,
-                                                          layout.id, report.data(), report.size());
-      if (error != ESP_OK) ESP_LOGD(TAG, "Keyboard LED report unsupported: %s", esp_err_to_name(error));
+      if (report.size() > sizeof(ControlRequest::data)) {
+        ESP_LOGD(TAG, "Skipping oversized optional LED report");
+        continue;
+      }
+      // A receiver may take five seconds to time out a control request. Never
+      // block the input/output worker while sending optional lock-key LEDs.
+      if (uxQueueSpacesAvailable(controls_) <= 16) { slot.led_pending = true; break; }
+      ControlRequest request;
+      request.handle = slot.handle;
+      request.type = ControlType::LED;
+      request.report_id = layout.id;
+      request.length = report.size();
+      std::memcpy(request.data, report.data(), report.size());
+      queue_control_(request);
     }
   }
 }
@@ -472,6 +594,9 @@ void KVMUSBBridge::loop() {
     ESP_LOGD(TAG, "Keyboard interfaces: %u, output mounted: %s, input reports: %u, delivered: %u, ignored: %u, overflows: %u",
              input_count_.load(), mounted_.load() ? "yes" : "no", received_.load(), delivered_.load(),
              rejected_.load(), overflows_.load());
+    ESP_LOGD(TAG, "USB health: queued=%u in-flight-age=%ums recoveries=%u stale=%u input-errors=%u control-errors=%u max-control=%ums max-worker-gap=%ums",
+             queued_output_.load(), in_flight_age_ms_.load(), recoveries_.load(), stale_.load(),
+             input_errors_.load(), control_errors_.load(), max_control_ms_.load(), max_worker_gap_ms_.load());
     ESP_LOGD(TAG, "USB state: HS root=%08X FS config=%08X status=%08X control=%08X PHY-swap=%u",
              host_enabled_ ? unsigned(USB_DWC_HS.hprt_reg.val) : 0u, unsigned(USB_DWC_FS.dcfg_reg.val),
              unsigned(USB_DWC_FS.dsts_reg.val), unsigned(USB_DWC_FS.dctl_reg.val),

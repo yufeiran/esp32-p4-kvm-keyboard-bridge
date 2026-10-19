@@ -1,0 +1,41 @@
+test_hid_keyboard.cpp
+PASS boot 6KRO, modifiers, padding, LEDs, truncated input, release
+PASS 144-bit NKRO -> 6KRO, seventh-key rollover and recovery
+PASS report IDs, Push/Pop, consumer isolation, interface merge
+PASS input error preservation, disconnect release, malformed descriptors
+PASS actual Air75 V3 receiver descriptors: 8/19-byte inputs, LEDs, merge and release
+PASS 10000 malformed/random descriptor robustness cases
+PASS Ctrl+Alt+/ consumed, exact acknowledged KVM macro, held-key suppression and debounce
+PASS left/right modifiers, Shift/GUI exclusion, all six chord arrival orders
+PASS timeout/abort without replay, timer wrap, and release before sequence completion
+PASS bounded transition queue, FIFO wrap, release-only overflow, stale-wake discard and held keys
+PASS fresh-release gate, suspend/reset boundary, stale input and millisecond wrap
+
+Standalone source compiled, not flashed in this update:
+PASS USB 1.10 device descriptor
+PASS class per interface, EP0 64 bytes, one configuration
+PASS one interface, complete 34-byte configuration descriptor
+PASS HID Boot Keyboard interface, one endpoint
+PASS HID 1.11, correct 63-byte report descriptor length
+PASS interrupt IN 0x81, eight-byte maximum packet, one-millisecond interval
+PASS well-bounded HID items and no Report ID
+OTA SHA256 5ab00a170eac3f266d3c3de776468688efeebbde2d7a8b3165fc42806a778eb7
+
+Same-core integrated hardware checks:
+Integrated firmware built 2026-10-19 18:38:44 +08:00; OTA succeeded.
+Same Waveshare production P4 rev3.2, NuPhy Air75 V3 receiver and HKS202-M24.
+Before update: about 18 hours uptime, free heap 478908 B, historical minimum 474404 B,
+no Ethernet disconnects and one queue overflow. This snapshot does not prove a leak.
+Tester confirmed ordinary input, intentional hold/release and bidirectional switching.
+Native USB output disconnected for about ten seconds while input keys were pressed
+and released. Logs captured suspend then a fresh attach; no old typing burst was replayed.
+One initial Backspace issue was suspected in the Codex editor. A separate Windows
+Notepad test confirmed repeated abc/Backspace, held a, release and deletion all normal.
+Short-test snapshot: no input/output/control transfer errors and zero queue overflows;
+output queue and in-flight age returned to zero. Three recovery events correspond to
+initial attach plus the deliberate suspend/reattach test, not three unexplained faults.
+Worker maximum delay during the test was 28 ms; Home Assistant reconnected.
+Waited for Boot seems successful; no eFuses were programmed and no NVS erase was performed.
+Not yet verified: an overnight idle soak, every host sleep condition, deliberate host
+transfer-error injection or physical fault injection of the output-stall reconnect path.
+The precise cause of the earlier long-idle incident remains unproven.

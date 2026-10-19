@@ -22,7 +22,7 @@ This sequence came from hardware debugging: OTG soft disconnect alone, or pad di
 
 ## Input processing
 
-The IDF HID driver notifies connection and input events. Callbacks copy each event/report into a bounded queue (64 entries) immediately. A separate worker handles descriptor parsing, interface open/close and control requests. Blocking HID control requests inside the driver's event task previously prevented progress; polling only the latest report also loses short press/release edges.
+The IDF HID driver notifies connection and input events. Callbacks copy each event/report into a bounded queue (64 entries) immediately. A forwarding worker handles parsing and output. A second serialized control task handles LED requests, interface cleanup and endpoint restart, so a slow optional control transfer cannot pause normal key forwarding. Initial interface opening/protocol selection still happens in the forwarding worker before streaming starts. Blocking HID control requests inside the driver's event task previously prevented progress; polling only the latest report also loses short press/release edges.
 
 The parser in `hid_keyboard.h` is independent of ESPHome and FreeRTOS. It recognizes keyboard usage-page fields, array reports, bitmaps, Report IDs and global Push/Pop. It skips unrelated collections and validates descriptor/report bounds. It merges keyboard states from up to eight interface slots. This is not a promise to support every possible HID descriptor: vendor-defined protocols, unusual layouts beyond parser bounds and non-keyboard usages need separate implementation.
 
@@ -34,9 +34,9 @@ Input disconnect clears that interface's held state. Malformed/truncated input c
 
 Output is one HID Boot Keyboard interface, with no Report ID, an 8-byte input report and a one-byte LED output report. Both Boot and Report protocol use the same keyboard shape. Keyboard modifier bits are kept separately from the six ordinary usages. If more than six ordinary keys are held, the six output slots contain HID ErrorRollOver (`0x01`), then recover when the count drops.
 
-A second bounded queue preserves output press/release transitions. It waits for endpoint readiness and the bridge's own completion callback flag. TinyUSB can clear endpoint-busy before our callback runs on another core; the explicit in-flight flag avoids attributing an earlier completion to a later hotkey report. `SET_IDLE` is honored in four-millisecond units. LED reports travel back through each input descriptor's applicable LED layout; an unsupported receiver LED request is nonfatal.
+A bounded timestamped output buffer preserves recent press/release transitions and drops old backlogs instead of replaying them on wake. Both input and output transitions have a 100 ms age bound. It waits for endpoint readiness and the bridge's own completion callback flag. TinyUSB can clear endpoint-busy before our callback runs on another core; the explicit in-flight flag avoids attributing an earlier completion to a later hotkey report. `SET_IDLE` is honored in four-millisecond units. LED reports travel back through each input descriptor's applicable LED layout; an unsupported receiver LED request is nonfatal.
 
-On mount, the output starts with all keys released and then the current filtered state. Queue overflow similarly schedules a release before a resynchronization. There is no keystroke recording, networking or typed-character log in the standalone configuration. Optional descriptor dumps contain static HID metadata; INFO logs include connection state and explicit switch requests.
+Mount, suspend/resume, overflow and error recovery clear the old output buffer and begin with all keys released. A release gate requires a fresh physical all-up report before forwarding new key states, so a synthetic state clear does not re-arm stale held keys. Fast re-enumeration is detected through TinyUSB lifecycle epochs even if the worker never samples mounted=false. A one-second undelivered transfer on an active, nonsuspended output triggers a real PHY detach/reconnect, limited to one attempt per 30 seconds; shortcuts are not replayed. If input transfers fail, stop/start is requested through the serialized control task. Recovery failures are logged and counted; not every driver failure can be repaired automatically. There is no keystroke recording, networking or typed-character log in the standalone configuration. Optional descriptor dumps contain static HID metadata; INFO logs include connection state and explicit switch requests.
 
 ## Optional Ctrl+Alt+/ macro
 
@@ -77,3 +77,5 @@ This is the HKS202-M24's native next-input sequence with its default RightCtrl t
 - [Waveshare board documentation and schematics](https://docs.waveshare.net/ESP32-P4-Module-DEV-KIT/)
 
 Implementation-specific conclusions above come from this source tree and the recorded hardware tests, not from a claim about the KVM's internal firmware.
+
+See [the current reliability investigation](reliability.md) for tested scope and remaining long-idle validation.

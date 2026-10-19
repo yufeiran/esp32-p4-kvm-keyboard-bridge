@@ -52,6 +52,8 @@ async def to_code(config):
     esp32.add_idf_sdkconfig_option("CONFIG_TINYUSB_HID_ENABLED", True)
     esp32.add_idf_sdkconfig_option("CONFIG_TINYUSB_HID_COUNT", 1)
     esp32.add_idf_sdkconfig_option("CONFIG_TINYUSB_HID_BUFSIZE", 64)
+    esp32.add_idf_sdkconfig_option("CONFIG_TINYUSB_SUSPEND_CALLBACK", True)
+    esp32.add_idf_sdkconfig_option("CONFIG_TINYUSB_RESUME_CALLBACK", True)
     esp32.add_idf_sdkconfig_option("CONFIG_USB_HOST_CONTROL_TRANSFER_MAX_SIZE", 2048)
     # Direct HS root port only: bypass Waveshare's CH334 hub with the HOST jumper.
     esp32.add_idf_sdkconfig_option("CONFIG_USB_HOST_HUBS_SUPPORTED", False)

@@ -21,6 +21,14 @@ It runs on the P4 itself: **no keyboard firmware modification, C6 firmware, comp
 
 Ordinary output usages are limited to `0x04–0x65`; extended keys such as F13–F24 are not forwarded.
 
+### Long-idle recovery update (2026-10-19)
+
+A tester reported an unresponsive keyboard followed by repeated input after a long idle period. The earlier firmware could retain transitions while USB was suspended, and its in-flight flag could outlive a fast bus reset. LED control requests also ran in the forwarding worker and could block it. These are confirmed code gaps; which path caused that past incident was not captured.
+
+Current source discards transitions older than 100 ms, clears old queues on suspend/resume/re-enumeration, sends all-keys-up and waits for a fresh physical release after recovery. Normal acknowledged long presses are preserved. A genuinely stalled active output gets a bounded re-enumeration attempt. LED/close/restart requests now run in a separate serialized control task, and input transfer errors request endpoint restart. Recovery can consume the initial wake-up keystroke; release the keys and press again. This update has not yet passed an overnight idle soak test. See [reliability notes](docs/reliability.md).
+
+**Prebuilt version:** the v0.1.0 binary below predates these recovery changes. Build current source for the fixes; the old binary remains a versioned initial-test artifact.
+
 ## 2. How it works
 
 P4 acts as two different USB participants at once:
@@ -103,6 +111,7 @@ Either left/right Ctrl and Alt are accepted; all six arrival orders of the three
 | [hid_keyboard.h](components/kvm_usb_bridge/hid_keyboard.h) | Portable HID parser, state merge, 6KRO output and LED encoding |
 | [kvm_usb_bridge.cpp](components/kvm_usb_bridge/kvm_usb_bridge.cpp) | IDF host, TinyUSB device, queues, reconnect and PHY routing |
 | [switch_hotkey.h](components/kvm_usb_bridge/switch_hotkey.h) | Optional chord filter and acknowledged KVM macro |
+| [report_buffer.h](components/kvm_usb_bridge/report_buffer.h) | Timestamped bounded output queue and fresh-release gate |
 | [__init__.py](components/kvm_usb_bridge/__init__.py) | ESPHome configuration and IDF dependencies |
 | [tests](tests) | Real NuPhy descriptor fixtures, parser/macro tests and linked-ELF USB audit |
 

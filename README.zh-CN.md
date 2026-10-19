@@ -21,6 +21,14 @@ flowchart LR
 
 普通输出键码范围为 `0x04–0x65`，F13–F24 等扩展按键暂不转发。
 
+### 长时间闲置后的恢复更新（2026-10-19）
+
+使用者反馈长时间闲置后键盘暂时无响应，随后出现重复输入。旧固件在 USB 休眠时可能保留按键队列，快速总线复位后也可能遗留“传输未完成”标志；LED 控制请求还与按键转发共用工作任务，可能阻塞它。这些是已确认的代码缺口，但没有捕获到此前那次故障的完整现场，不能认定其中某一个就是唯一原因。
+
+当前源码丢弃超过 100 ms 的旧按键变化，在休眠、恢复和重新枚举时清空积压，先发全松键报告，等待新的物理松键后恢复输入。正常已送达的长按不受超时限制；活动输出确实停住时会尝试重新枚举。LED、关闭接口和重启读取放到独立串行控制任务，输入传输报错时请求重新启动端点。恢复时可能消耗第一次唤醒按键，松开后重新按即可。这次更新尚未完成整夜闲置验证。详见[稳定性说明](docs/reliability.md)。
+
+**预编译版本**：下方的 v0.1.0 镜像早于本次恢复修复；需要修复请构建当前源码。旧镜像保留作初始实测版本记录。
+
 ## 2. 原理是什么
 
 P4 同时扮演两个 USB 角色：
@@ -103,6 +111,7 @@ kvm_usb_bridge:
 | [hid_keyboard.h](components/kvm_usb_bridge/hid_keyboard.h) | 可独立测试的 HID 解析、按键合并、6KRO 输出和 LED 编码 |
 | [kvm_usb_bridge.cpp](components/kvm_usb_bridge/kvm_usb_bridge.cpp) | IDF Host、TinyUSB Device、队列、断线恢复和 PHY 路由 |
 | [switch_hotkey.h](components/kvm_usb_bridge/switch_hotkey.h) | 可选组合键过滤和逐次确认的 KVM 宏 |
+| [report_buffer.h](components/kvm_usb_bridge/report_buffer.h) | 带时间戳的有界队列和真实松键门控 |
 | [__init__.py](components/kvm_usb_bridge/__init__.py) | ESPHome 配置及 IDF 依赖 |
 | [tests](tests) | 真实 NuPhy 描述符、解析器/宏测试、最终 ELF 描述符检查 |
 
