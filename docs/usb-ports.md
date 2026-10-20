@@ -9,7 +9,7 @@ python -m esphome compile keyboard-bridge-hub.yaml
 ```
 
 <!-- hardware-status -->
-The tester confirmed typing and immediate Backspace release through each of the three CH334 sockets with the integrated b16d244 image. A route-change error/retry storm also caused a task-watchdog reset. The current integrated 0197521 image adds error-only restart pacing (100ms per serialized attempt) and prioritizes host cleanup above HID callbacks. Its DEVICE → HOST → DEVICE recovery, typing/release and hotkey regression is pending. The offline hub profile compiled and passed its linked audit but was not flashed. Overnight stability is unverified. No four-onboard-socket compatibility is claimed.
+The tester confirmed typing and immediate Backspace release through each of the three CH334 sockets with the integrated b16d244 image. A route-change error/retry storm also caused a task-watchdog reset. The current integrated 0197521 image adds error-only restart pacing (100ms per serialized attempt) and prioritizes host cleanup above HID callbacks. DEVICE → HOST → DEVICE recovery, typing/release and bidirectional hotkey switching passed on this follow-up image. The offline hub profile compiled and passed its linked audit but was not flashed. Overnight stability is unverified. No four-onboard-socket compatibility is claimed.
 <!-- /hardware-status -->
 
 ## Why four sockets are not four interchangeable ports

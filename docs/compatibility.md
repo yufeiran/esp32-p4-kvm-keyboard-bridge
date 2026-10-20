@@ -20,9 +20,9 @@ The same NuPhy receiver exposes both traditional and bitmap keyboard interfaces.
 
 ## Optional hub profile
 
-The tester confirmed typing and immediate Backspace release through each of the three CH334 sockets with the integrated b16d244 image. A route-change error/retry storm also caused a task-watchdog reset. The current integrated 0197521 image adds error-only restart pacing (100ms per serialized attempt) and prioritizes host cleanup above HID callbacks. Its DEVICE → HOST → DEVICE recovery, typing/release and hotkey regression is pending. The offline hub profile compiled and passed its linked audit but was not flashed. Overnight stability is unverified. No four-onboard-socket compatibility is claimed.
+The tester confirmed typing and immediate Backspace release through each of the three CH334 sockets with the integrated b16d244 image. A route-change error/retry storm also caused a task-watchdog reset. The current integrated 0197521 image adds error-only restart pacing (100ms per serialized attempt) and prioritizes host cleanup above HID callbacks. DEVICE → HOST → DEVICE recovery, typing/release and bidirectional hotkey switching passed on this follow-up image. The offline hub profile compiled and passed its linked audit but was not flashed. Overnight stability is unverified. No four-onboard-socket compatibility is claimed.
 
-使用者已确认：集成固件 b16d244 在 CH334 的三个 USB-A 口均能打字，松开退格立即停止。切换 USB 路径时另捕获一次密集错误重试、UART 刷日志和看门狗重启；当前集成固件 0197521 仅在出错重启读取前等待 100 ms，并提高 USB 插拔清理的任务优先级。此跟进版本的 DEVICE → HOST → DEVICE 恢复、打字松键及热键回归仍待确认。离线 Hub 版本已构建并核验，未刷入本次设备；整夜稳定性仍未验证。没有宣称板上四个口能同时接通。
+使用者已确认：集成固件 b16d244 在 CH334 的三个 USB-A 口均能打字，松开退格立即停止。切换 USB 路径时另捕获一次密集错误重试、UART 刷日志和看门狗重启；当前集成固件 0197521 仅在出错重启读取前等待 100 ms，并提高 USB 插拔清理的任务优先级。此跟进版本已通过 DEVICE → HOST → DEVICE 自动恢复、打字松键和双向热键切换回归。离线 Hub 版本已构建并核验，未刷入本次设备；整夜稳定性仍未验证。没有宣称板上四个口能同时接通。
 
 [Board topology and exact limits](usb-ports.md).
 
