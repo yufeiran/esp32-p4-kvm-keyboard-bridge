@@ -70,7 +70,7 @@ Tested board: **Waveshare ESP32-P4-Module-DEV-KIT, production silicon rev3.2, 16
 | Board's **native USB-C, not UART/CH343** → KVM dedicated keyboard port | Full-Speed keyboard output, GPIO24 D− / GPIO25 D+ |
 | Board's **UART / CH343 USB-C** → computer / power | Flashing, power and UART0 diagnostics at 115200 baud |
 
-Use USB data cables. Keep the UART/CH343 cable connected for the tested power arrangement. The default profile bypasses CH334 with the HOST jumper and uses one direct USB-A socket. An optional `keyboard-bridge-hub.yaml` profile enables the three hub sockets with H3 on the DEVICE side; hardware validation is pending. This board physically selects **one direct socket or three hub sockets**: firmware cannot make all four active together. See [USB ports, wiring and limits](docs/usb-ports.md). Ethernet and KVM UART/IR wiring are unnecessary for this standalone project.
+Use USB data cables. Keep the UART/CH343 cable connected for the tested power arrangement. The default profile bypasses CH334 with the HOST jumper and uses one direct USB-A socket. An optional `keyboard-bridge-hub.yaml` profile enables the three hub sockets with H3 on the DEVICE side; three-socket typing/release was tested in the integrated firmware; follow-up recovery status is recorded below. This board physically selects **one direct socket or three hub sockets**: firmware cannot make all four active together. See [USB ports, wiring and limits](docs/usb-ports.md). Ethernet and KVM UART/IR wiring are unnecessary for this standalone project.
 
 ### Build and flash
 

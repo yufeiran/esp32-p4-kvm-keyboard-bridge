@@ -43,3 +43,5 @@ No raw typed keyboard reports or characters were recorded.
 - Integrated image booted via OTA with direct-path receiver enumeration and KVM mount, FS/LS-only=1.
 - Physical typing on each of the three hub ports remains pending; no claim of four interchangeable onboard sockets.
 - Standalone hub image was not flashed. The v0.1.0 public binary remains unchanged and does not include this feature.
+
+2026-10-20 hub follow-up: all three CH334 sockets confirmed by tester on b16d244. Route change captured dense error/retry logging and one watchdog reset. Current 0197521 adds error-only 100ms restart pacing and host-daemon priority 6 above HID priority 5. Both paced images compiled/audited; standalone not flashed. Paced physical regression: PENDING.

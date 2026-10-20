@@ -158,7 +158,9 @@ void KVMUSBBridge::setup() {
     return;
   }
   ESP_LOGI(TAG, "Input host: %s", host_hub_support_ ? "single hub or direct, FS/LS only" : "direct only");
-  if (xTaskCreate(host_daemon_, "kvm_usb_host", 4096, this, 4, nullptr) != pdPASS) {
+  // Disconnect/hub cleanup must outrank HID callbacks (priority 5),
+  // especially when changing the board's physical USB route.
+  if (xTaskCreate(host_daemon_, "kvm_usb_host", 4096, this, 6, nullptr) != pdPASS) {
     running_.store(false); mark_failed(); return;
   }
   hid_host_driver_config_t hid{};
@@ -233,6 +235,12 @@ void KVMUSBBridge::control_task_(void *arg) {
   while (self->running_.load()) {
     ControlRequest request;
     if (xQueueReceive(self->controls_, &request, pdMS_TO_TICKS(100)) != pdPASS) continue;
+    // A failed interrupt transfer is not automatically rearmed by the driver.
+    // Immediate stop/start can spin on a disappearing device, flooding UART
+    // and starving the main loop. One serialized worker bounds aggregate
+    // restart attempts to <=10/s. Only error recovery waits; key forwarding
+    // has its own task and disconnect releases are processed immediately.
+    if (request.type == ControlType::RESTART) vTaskDelay(pdMS_TO_TICKS(100));
     const uint32_t started = millis();
     esp_err_t error;
     if (request.type == ControlType::LED) {

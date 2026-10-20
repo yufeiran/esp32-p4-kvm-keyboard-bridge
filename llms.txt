@@ -33,4 +33,4 @@ The example enables drain_auxiliary_interfaces to retain/poll receiver auxiliary
 
 ## Optional hub input
 
-The optional keyboard-bridge-hub.yaml enables a single FS/LS hub; hardware validation is pending. The Waveshare H3 switch selects ONE direct USB-A socket OR THREE CH334 sockets. No firmware can activate all four without changing the physical routing. Read docs/usb-ports.md. The default profile remains direct-only.
+The optional keyboard-bridge-hub.yaml enables a single FS/LS hub. Three socket typing/release passed in the integrated firmware; an error-retry/watchdog follow-up is documented with exact image/test status in docs/compatibility.md. The Waveshare H3 switch selects ONE direct USB-A socket OR THREE CH334 sockets. No firmware can activate all four without changing the physical routing. Read docs/usb-ports.md. The default profile remains direct-only.

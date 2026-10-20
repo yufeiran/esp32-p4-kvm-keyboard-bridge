@@ -8,7 +8,9 @@
 python -m esphome compile keyboard-bridge-hub.yaml
 ```
 
-Hardware validation of this profile is pending. Compilation and a linked-image audit do not establish working input through a physical hub.
+<!-- hardware-status -->
+The tester confirmed typing and immediate Backspace release through each of the three CH334 sockets with the integrated b16d244 image. A route-change error/retry storm also caused a task-watchdog reset. The current integrated 0197521 image adds error-only restart pacing (100ms per serialized attempt) and prioritizes host cleanup above HID callbacks. Its DEVICE → HOST → DEVICE recovery, typing/release and hotkey regression is pending. The offline hub profile compiled and passed its linked audit but was not flashed. Overnight stability is unverified. No four-onboard-socket compatibility is claimed.
+<!-- /hardware-status -->
 
 ## Why four sockets are not four interchangeable ports
 
@@ -31,7 +33,7 @@ Only a single hub level is enabled. The existing pool has eight HID-interface sl
 
 ## 中文
 
-新增可选 `host_hub_support: true`，开启单层 Hub，并让输入端 HS 控制器按 Full/Low Speed 工作，避开当前驱动不支持的高速 Hub 转换路径。给 KVM 的 USB 输出、8 字节报告、松键恢复和切换热键不变。默认配置仍是直连；可用 `keyboard-bridge-hub.yaml` 构建离线 Hub 版本。此配置的硬件验证尚待完成。
+新增可选 `host_hub_support: true`，开启单层 Hub，并让输入端 HS 控制器按 Full/Low Speed 工作，避开当前驱动不支持的高速 Hub 转换路径。给 KVM 的 USB 输出、8 字节报告、松键恢复和切换热键不变。默认配置仍是直连；可用 `keyboard-bridge-hub.yaml` 构建离线 Hub 版本。三口功能已实测；恢复跟进版本的确切验证状态见本页英文段落及兼容性记录。
 
 这块板不是四个口都接在 Hub 上：三个 USB-A 接 CH334 的第 1–3 路，第 4 路只引到 TP1/TP2。剩下一个 USB-A 是直连口，通过 FSUSB42 模拟开关与 Hub 上游二选一。H3 的 HOST 侧选择直连口，DEVICE 侧选择 Hub 的三个口。DEVICE 是板上丝印，使用本固件时 P4 仍是主机。软件无法绕过这个物理跳线；不改硬件不能让四个口同时接通。
 
