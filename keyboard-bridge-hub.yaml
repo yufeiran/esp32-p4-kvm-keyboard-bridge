@@ -1,0 +1,7 @@
+# Experimental single-hub input profile. Same offline firmware and KVM output.
+# Board jumper: DEVICE side for the three CH334 sockets; HOST for direct socket.
+packages:
+  base: !include keyboard-bridge.yaml
+
+kvm_usb_bridge:
+  host_hub_support: true

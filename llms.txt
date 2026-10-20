@@ -30,3 +30,7 @@ Long-idle unresponsiveness and repeated input were reported for the initial firm
 ## Wireless reconnection follow-up
 
 The example enables drain_auxiliary_interfaces to retain/poll receiver auxiliary HID endpoints while discarding their payloads. Three keyboard-off/on held-Backspace release cycles plus switching passed in the integrated firmware after a matched direct-PC control passed and the old P4 path reproduced failure. See docs/reliability.md. Exact receiver/host mechanism and overnight idle stability remain unproven; v0.1.0 binary predates this source change. trace_key_counts is optional, count/length/time-only, and stops after five minutes.
+
+## Optional hub input
+
+The optional keyboard-bridge-hub.yaml enables a single FS/LS hub; hardware validation is pending. The Waveshare H3 switch selects ONE direct USB-A socket OR THREE CH334 sockets. No firmware can activate all four without changing the physical routing. Read docs/usb-ports.md. The default profile remains direct-only.

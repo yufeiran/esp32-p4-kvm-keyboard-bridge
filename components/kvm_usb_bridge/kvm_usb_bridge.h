@@ -42,6 +42,7 @@ class KVMUSBBridge : public Component {
   void set_leds(uint8_t value) { leds_.store(value & 0x1F); led_revision_.fetch_add(1); }
   void set_idle(uint8_t value) { idle_rate_.store(value); }
   void set_host_enabled(bool value) { host_enabled_ = value; }
+  void set_host_hub_support(bool value) { host_hub_support_ = value; }
   void set_output_phy(uint8_t value) { output_phy_ = value; }
   void set_swap_data_pins(bool value) { swap_data_pins_ = value; }
   void set_dump_descriptors(bool value) { dump_descriptors_ = value; }
@@ -156,6 +157,7 @@ class KVMUSBBridge : public Component {
   std::atomic<bool> waiting_for_release_{false};
   uint16_t traced_desired_counts_{0xFFFF};
   uint32_t last_status_ms_{0};
+  bool host_hub_support_{false};
   bool host_enabled_{true};
   uint8_t output_phy_{0};
   bool swap_data_pins_{false};

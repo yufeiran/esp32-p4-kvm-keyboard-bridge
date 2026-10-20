@@ -150,13 +150,14 @@ void KVMUSBBridge::setup() {
   usb_host_config_t host{};
   host.intr_flags = ESP_INTR_FLAG_LEVEL1;
   // IDF 5.5 Host numbers HS=0, FS=1; TinyUSB numbers FS=0, HS=1.
-  host.peripheral_map = 1u << 0;  // HS root controller, physically the direct USB-A port.
+  host.peripheral_map = 1u << 0;  // HS-capable input controller; physical route selected by board jumper.
   error = usb_host_install(&host);
   if (error != ESP_OK) {
     ESP_LOGE(TAG, "HS host initialization failed: %s", esp_err_to_name(error));
     mark_failed();
     return;
   }
+  ESP_LOGI(TAG, "Input host: %s", host_hub_support_ ? "single hub or direct, FS/LS only" : "direct only");
   if (xTaskCreate(host_daemon_, "kvm_usb_host", 4096, this, 4, nullptr) != pdPASS) {
     running_.store(false); mark_failed(); return;
   }
@@ -178,7 +179,7 @@ void KVMUSBBridge::setup() {
       xTaskCreate(bridge_task_, "kvm_usb_bridge", 8192, this, 5, nullptr) != pdPASS) {
     mark_failed(); return;
   }
-  ESP_LOGI(TAG, "Ready: USB-A direct host -> FS boot keyboard on native USB-C (GPIO24/25)");
+  ESP_LOGI(TAG, "Ready: USB-A host -> FS boot keyboard on native USB-C (GPIO24/25)");
 }
 
 void KVMUSBBridge::host_daemon_(void *arg) {
@@ -685,7 +686,9 @@ void KVMUSBBridge::service_leds_() {
 
 void KVMUSBBridge::dump_config() {
   ESP_LOGCONFIG(TAG, "P4 USB keyboard bridge: HS host -> FS USB 1.1 boot 6KRO (8 bytes, no Report ID)");
-  ESP_LOGCONFIG(TAG, "Input: direct USB-A, HOST jumper; Output: native USB-C GPIO24/25; logs: CH343/UART0");
+  ESP_LOGCONFIG(TAG, "Input hub support: %s (board jumper selects direct socket OR three hub sockets)",
+                host_hub_support_ ? "enabled, FS/LS only" : "disabled");
+  ESP_LOGCONFIG(TAG, "Output: native USB-C GPIO24/25; logs: CH343/UART0");
   ESP_LOGCONFIG(TAG, "Ctrl+Alt+/ -> TESmart next input: %s", switch_hotkey_.enabled() ? "enabled" : "disabled");
 }
 
@@ -725,8 +728,9 @@ void KVMUSBBridge::loop() {
              input_callbacks_.load(), empty_input_.load(), array_input_.load(), bitmap_input_.load(), other_input_.load());
     ESP_LOGD(TAG, "Auxiliary drain: interfaces=%u reports=%u errors=%u", auxiliary_count_.load(),
              auxiliary_reports_.load(), auxiliary_errors_.load());
-    ESP_LOGD(TAG, "USB state: HS root=%08X FS config=%08X status=%08X control=%08X PHY-swap=%u",
-             host_enabled_ ? unsigned(USB_DWC_HS.hprt_reg.val) : 0u, unsigned(USB_DWC_FS.dcfg_reg.val),
+    ESP_LOGD(TAG, "USB state: HS root=%08X FS/LS-only=%u FS config=%08X status=%08X control=%08X PHY-swap=%u",
+             host_enabled_ ? unsigned(USB_DWC_HS.hprt_reg.val) : 0u,
+             host_enabled_ ? unsigned(USB_DWC_HS.hcfg_reg.fslssupp) : 0u, unsigned(USB_DWC_FS.dcfg_reg.val),
              unsigned(USB_DWC_FS.dsts_reg.val), unsigned(USB_DWC_FS.dctl_reg.val),
              unsigned(LP_SYS.usb_ctrl.sw_usb_phy_sel));
     ESP_LOGD(TAG, "FS pads: WRAP=%08X USJ=%08X PHY clocks=%08X USJ interrupts=%08X",

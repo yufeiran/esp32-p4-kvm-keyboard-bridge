@@ -4,11 +4,13 @@ Start with [what the bridge does and why](../README.md), or the [中文说明](.
 
 ## USB roles and controller numbering
 
-ESP32-P4 has separate HS and FS OTG controllers. The bridge uses the HS-capable controller as a host for the direct USB-A port and the FS controller as a device for the KVM. A keyboard does not have to operate at High Speed merely because it is attached to the HS controller.
+ESP32-P4 has separate HS and FS OTG controllers. The bridge uses the HS-capable controller as a host for the jumper-selected USB-A path and the FS controller as a device for the KVM. A keyboard does not have to operate at High Speed merely because it is attached to the HS controller.
 
 In the pinned versions, **IDF Host numbers HS=0 / FS=1; TinyUSB numbers FS=0 / HS=1**. The host uses `peripheral_map = 1 << 0`; the device uses `TINYUSB_PORT_FULL_SPEED_0`. Reusing one stack's controller index in the other silently selects the wrong controller.
 
 The tested board wires its native USB-C data pair to GPIO24/25. FS OTG's default PHY is on GPIO26/27. `usb_wrap_ll_phy_select` switches the route at runtime after TinyUSB installation. The CH343 is a separate UART bridge, so the console remains available on UART0 GPIO37/38.
+
+The opt-in hub profile forces this input controller to FS/LS-only operation through a pinned-IDF compatibility shim. H3 selects one direct socket or three CH334 sockets, never all four. See [USB port topology and implementation](usb-ports.md).
 
 ## Start and restart
 

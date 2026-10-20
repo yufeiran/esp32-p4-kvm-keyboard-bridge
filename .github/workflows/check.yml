@@ -13,6 +13,13 @@ jobs:
           cmake --build build --parallel
           ctest --test-dir build --output-on-failure
   firmware:
+    strategy:
+      matrix:
+        include:
+          - config: keyboard-bridge.yaml
+            audit_flags: ''
+          - config: keyboard-bridge-hub.yaml
+            audit_flags: --hub
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -21,6 +28,6 @@ jobs:
           python-version: '3.12'
           cache: pip
       - run: pip install -r requirements.txt
-      - run: esphome compile keyboard-bridge.yaml
+      - run: esphome compile ${{ matrix.config }}
       - name: Audit linked USB descriptors
-        run: python tests/verify_firmware.py .esphome/build/p4-keyboard-bridge/.pioenvs/p4-keyboard-bridge/firmware.elf --bin .esphome/build/p4-keyboard-bridge/.pioenvs/p4-keyboard-bridge/firmware.bin
+        run: python tests/verify_firmware.py .esphome/build/p4-keyboard-bridge/.pioenvs/p4-keyboard-bridge/firmware.elf --bin .esphome/build/p4-keyboard-bridge/.pioenvs/p4-keyboard-bridge/firmware.bin ${{ matrix.audit_flags }}

@@ -18,6 +18,12 @@ The hardware confirmations above used this bridge engine inside the original ESP
 
 The same NuPhy receiver exposes both traditional and bitmap keyboard interfaces. No controlled NKRO-only / interface-only / USB-version-only comparison has been completed. Do not translate this matrix into “all NKRO keyboards fail” or “all 6KRO keyboards work.” The KVM controller chip and its exact firmware limitation remain unknown.
 
+## Optional hub profile
+
+Hub-profile hardware validation is pending. The default direct-port result above must not be read as a three-port hub result. [Board topology and exact limits](usb-ports.md).
+
+可选 Hub 版本尚待硬件验证；上表直连口的结果不代表 Hub 三口已实测。板上跳线只能选择直连口或三个 Hub 口。
+
 ## Automated checks
 
 - Traditional boot report: modifiers, padding, key arrays, LED encoding and release.

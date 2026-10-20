@@ -17,6 +17,7 @@ CONFIG_SCHEMA = cv.All(
     cv.Schema({
         cv.GenerateID(): cv.declare_id(KVMUSBBridge),
         cv.Optional("host_enabled", default=True): cv.boolean,
+        cv.Optional("host_hub_support", default=False): cv.boolean,
         cv.Optional("output_phy", default="GPIO24_GPIO25"): cv.one_of("GPIO24_GPIO25", "GPIO26_GPIO27"),
         cv.Optional("swap_data_pins", default=False): cv.boolean,
         cv.Optional("dump_descriptors", default=False): cv.boolean,
@@ -44,6 +45,7 @@ async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
     cg.add(var.set_host_enabled(config["host_enabled"]))
+    cg.add(var.set_host_hub_support(config["host_hub_support"]))
     cg.add(var.set_output_phy(0 if config["output_phy"] == "GPIO24_GPIO25" else 1))
     cg.add(var.set_swap_data_pins(config["swap_data_pins"]))
     cg.add(var.set_dump_descriptors(config["dump_descriptors"]))
@@ -59,8 +61,14 @@ async def to_code(config):
     esp32.add_idf_sdkconfig_option("CONFIG_TINYUSB_SUSPEND_CALLBACK", True)
     esp32.add_idf_sdkconfig_option("CONFIG_TINYUSB_RESUME_CALLBACK", True)
     esp32.add_idf_sdkconfig_option("CONFIG_USB_HOST_CONTROL_TRANSFER_MAX_SIZE", 2048)
-    # Direct HS root port only: bypass Waveshare's CH334 hub with the HOST jumper.
-    esp32.add_idf_sdkconfig_option("CONFIG_USB_HOST_HUBS_SUPPORTED", False)
+    # FS/LS devices cannot be translated through an HS hub by this stack.
+    # Hub mode also forces the HS-capable input controller to Full Speed.
+    hub = config["host_hub_support"]
+    esp32.add_idf_sdkconfig_option("CONFIG_USB_HOST_HUBS_SUPPORTED", hub)
+    esp32.add_idf_sdkconfig_option("CONFIG_USB_HOST_HUB_MULTI_LEVEL", False)
+    if hub:
+        cg.add_define("USE_KVM_USB_HOST_HUB")
+        cg.add_build_flag("-Wl,--wrap=hcd_port_command")
     # ESPHome 2026.5's logger references USJ VFS symbols even when UART0 is selected.
     # Keep that code linked; the actual console stays on CH343/UART0. PHY routing
     # is switched after TinyUSB installation, moving USJ to unused GPIO26/27.

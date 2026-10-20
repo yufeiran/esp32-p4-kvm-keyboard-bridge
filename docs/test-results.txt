@@ -30,3 +30,16 @@ This image has no network/HA/OTA/IR/KVM-UART configuration and switch_hotkey is 
 Optional hotkey hardware tests used the same core in an integrated configuration;
 tester confirmed both switching directions, normal post-switch input and one switch per hold.
 No raw typed keyboard reports or characters were recorded.
+
+
+2026-10-20 optional single-hub input (experimental)
+- Board schematic: H3 selects one direct USB-A socket OR three CH334 USB-A sockets.
+- CH334 downstream pair 4 ends at TP1/TP2, not the fourth physical socket.
+- host_hub_support defaults false. keyboard-bridge-hub.yaml opts into single-hub FS/LS-only input.
+- Integrated app SHA256: b16d244e23fe6daa34137a80a4f4b09cea7f081109be145b458fbc4df5dd9cc1.
+- Standalone hub app SHA256: 2ef2be4e8a4f3689dd0ae56cc8ff9590865f78a28fa4f32d5cbad87464336049.
+- Both configurations compiled and passed linked USB descriptor + HCD ABI/wrapper audits.
+- Existing portable parser/hotkey/recovery tests passed.
+- Integrated image booted via OTA with direct-path receiver enumeration and KVM mount, FS/LS-only=1.
+- Physical typing on each of the three hub ports remains pending; no claim of four interchangeable onboard sockets.
+- Standalone hub image was not flashed. The v0.1.0 public binary remains unchanged and does not include this feature.
