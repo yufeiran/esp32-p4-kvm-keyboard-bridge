@@ -61,3 +61,9 @@ Static descriptors and aggregate counters are sufficient for diagnostics. Typed 
 Application SHA-256 `128473103899f2bb9efb94bbd272c51de2dc490e3452eda37e7489e6144d8058`, built 2026-10-26 21:19:42 +08:00, was uploaded by OTA. Successful boot and KVM output mounting were observed. The tester confirmed ordinary typing, immediate held-Backspace release, knob volume/mute, Fn media actions and bidirectional Ctrl+Alt+/ switching on this final image. It includes the extended ordinary usage range; individual F13–F24 and System Power/Sleep/Wake actions were not physically tested. Overnight stability remains unverified.
 
 最终应用 SHA-256 如上，构建于 2026-10-26 21:19:42（UTC+8），OTA 后已观察到成功启动确认与 KVM 输出挂载。使用者确认普通输入、长按退格松手即停、旋钮音量／静音、Fn 媒体动作和双向 Ctrl+Alt+/ 切换全部正常。此镜像包含扩展普通键码范围；没有单独物理验证 F13–F24，也未触发电源／休眠／唤醒。整夜稳定性仍未验证。
+
+### Standalone build / 独立配置构建
+
+The offline `keyboard-bridge-media.yaml` profile built successfully at 2026-10-26 21:23:49 +08:00. Application SHA-256: `a4a9959094ab26bf7c9b9c22bf81476120e9618696fae72e496577f3cd40b4a0`. The linked `--hub --media` audit passed, including both HID interfaces and the compiled HCD ABI/reset wrapper. This standalone image was **not flashed** during this session. The [CI run for the implementation commit](https://github.com/yufeiran/esp32-p4-kvm-keyboard-bridge/actions/runs/40330742149) also runs sanitized portable tests and builds/audits all three example profiles; consult that run for its outcome.
+
+离线 `keyboard-bridge-media.yaml` 已于上述时间成功构建，应用 SHA-256 如上；`--hub --media` 最终链接检查通过，包含两个 HID 接口、HCD ABI 和复位包装器。此次**没有刷入独立镜像**。实现提交的 CI 同时运行带内存检查的测试及三种示例的构建／核验，状态以所链接的运行记录为准。
