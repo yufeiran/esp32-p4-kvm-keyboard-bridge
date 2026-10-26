@@ -124,6 +124,7 @@ class KVMUSBBridge : public Component {
   std::atomic<uint32_t> media_received_{0}, media_delivered_{0}, media_dropped_{0};
   std::atomic<uint32_t> media_gate_blocked_{0}, media_submitted_at_ms_{0};
   std::atomic<uint32_t> media_min_pulse_ms_{UINT32_MAX}, media_max_pulse_ms_{0};
+  std::atomic<uint32_t> media_trace_remaining_{2000};
   ReleaseGate release_gate_;
   QueueHandle_t events_{nullptr};
   QueueHandle_t controls_{nullptr};

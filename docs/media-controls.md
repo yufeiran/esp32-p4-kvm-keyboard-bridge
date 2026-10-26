@@ -88,3 +88,14 @@ The offline `keyboard-bridge-media.yaml` profile built successfully at 2026-10-2
 Integrated application `b26f8280f686e9ca977d3b289bd8838a42bed74edbc596fad544abe14e8d25d2` (2026-10-26 21:53:11 +08:00) contains the known-held recovery change and count-only timing diagnostics. OTA and successful boot were observed. At this recording the receiver was not on P4, so human regression and the idle-delay comparison are pending. The standalone media profile built and passed its linked audit, SHA-256 `78502721ca592d1d94fdcb006fcd9fdce60c1776331455fd31470f448f897573`; it was not flashed. Earlier hardware confirmations above apply to their named images, not automatically to this trial.
 
 集成诊断应用 `b26f8280…`（上述时间）包含按实际按住状态恢复门控的改动及计数时序诊断。OTA 和成功启动确认已观察到；记录时接收器未连接 P4，人工回归与闲置延迟对照仍待完成。独立媒体配置已构建并通过链接检查，SHA-256 如上，未刷入。上方旧版本的硬件确认不能自动算作本测试版也已通过。
+
+
+### Contact-maintenance follow-up / 旋钮触点处理后的跟进
+
+The owner reported that first-detent misses persisted with the recovery fix, including with P4 output connected toward the PC. After keyboard support suggested reseating and cleaning the rotary contacts, the owner tried that and reported that it now seemed normal, choosing to observe. This supports a contact-related explanation; it is not a controlled separation of cleaning versus reseating, or a long-term reliability result. No further USB-format or pulse-timing changes were made based on speculation.
+
+使用者反馈首格问题在门控修正后仍存在，P4 输出朝电脑连接时也会漏响应。随后客服建议重新插拔、清洁旋钮触点，使用者尝试后表示目前似乎恢复正常，先观察。这支持触点相关解释，但没有单独隔离擦拭与重插，也不是长期稳定性结论。没有据此继续试改 USB 格式或按键脉冲节奏。
+
+The installed integrated diagnostic image is SHA-256 `5e030d5124b204afe3b563ff378d0886a1a797e5ab0d406dbeea9526470536ef` (2026-10-26 22:39:53 +08:00). It retains the known-held gate fix; the only follow-up code change extends media count diagnostics using a 2000-record per-boot quota, while keyboard count traces retain their five-minute limit. Build, linked descriptor audit, OTA and successful boot passed. A sample showed approximately 5–6ms input pulses and approximately 1ms forwarding/ACK delay, without media queue drops or gate suppression. Windows-side synchronized failure capture was not conclusive. External diagnostic collectors were stopped after the maintenance result; the owner is observing with this firmware retained. The previous implementation CI run passed all four test/build jobs.
+
+当前保留的集成诊断镜像 SHA-256 如上（上述时间）。它保留已知按住状态的门控修正，后续代码只把媒体计数诊断延长为每次启动最多 2000 条；键盘计数仍在五分钟后停止。构建、描述符核验、OTA 和成功启动均通过。样本中输入脉冲约 5–6ms，转发／ACK 延迟约 1ms，没有媒体队列丢弃或门控拦截；Windows 侧的同步失败捕获没有得出确定结论。触点处理后已停止额外采集，按使用者要求保留当前固件观察。前一实现的 CI 四项测试／构建均通过。

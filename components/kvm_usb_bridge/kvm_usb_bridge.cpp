@@ -766,9 +766,16 @@ void KVMUSBBridge::controls_delivered(const uint8_t *report, uint16_t length) {
 
 void KVMUSBBridge::trace_counts_(uint8_t stage, uint8_t source, uint16_t counts,
                                 uint32_t at, uint32_t sequence, uint32_t age, uint8_t queued) {
-  // Optional diagnostics stop automatically after five minutes. Queueing a trace
-  // never blocks either USB task; printing happens in the ESPHome main loop.
-  if (count_traces_ == nullptr || millis() > 300000) return;
+  // Keyboard traces stop after five minutes. Media traces have a per-boot
+  // quota instead, so a first action after a long idle is still observable.
+  // All records contain only times/counts, never usages or input payloads.
+  if (count_traces_ == nullptr) return;
+  if (stage < 4 && millis() > 300000) return;
+  if (stage >= 4) {
+    uint32_t remaining = media_trace_remaining_.load();
+    do { if (remaining == 0) return; }
+    while (!media_trace_remaining_.compare_exchange_weak(remaining, remaining - 1));
+  }
   const CountTrace trace{at, sequence, age, counts, stage, source, queued};
   if (xQueueSend(count_traces_, &trace, 0) != pdPASS) trace_drops_.fetch_add(1);
 }
