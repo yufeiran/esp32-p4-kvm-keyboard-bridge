@@ -11,6 +11,7 @@ class SwitchHotkey {
   void set_enabled(bool value) { enabled_ = value; }
   bool enabled() const { return enabled_; }
   bool active() const { return active_; }
+  bool suppressing_physical() const { return active_ || suppressed_; }
   bool waiting_for_ack() const { return waiting_for_ack_; }
 
   bool observe(const KeyState &state, uint32_t now) {
@@ -35,8 +36,8 @@ class SwitchHotkey {
     return true;
   }
 
-  BootReport filtered_report(const KeyState &state) const {
-    return suppressed_ || active_ ? BootReport{} : boot_report(state);
+  BootReport filtered_report(const KeyState &state, uint8_t maximum = 0x65) const {
+    return suppressed_ || active_ ? BootReport{} : boot_report(state, maximum);
   }
 
   bool report_due(uint32_t now) const {

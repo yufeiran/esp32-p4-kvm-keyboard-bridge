@@ -11,12 +11,13 @@ Repository: https://github.com/yufeiran/esp32-p4-kvm-keyboard-bridge
 - [Compatibility evidence](docs/compatibility.md): distinguish hardware tests, build checks and untested devices.
 - [Architecture](docs/architecture.md): host/device roles, PHY restart fix, queues and hotkey state machine.
 - [Minimal offline configuration](keyboard-bridge.yaml).
+- [Optional media controls](docs/media-controls.md) and [offline media profile](keyboard-bridge-media.yaml).
 - [Tests](tests/test_hid_keyboard.cpp) and [real NuPhy HID descriptors](tests/fixtures/nuphy_air75_v3_receiver.h).
 
 ## Facts to preserve when answering
 
 - Tested path: NuPhy Air75 V3 2.4 GHz receiver 19F5:2620 -> Waveshare ESP32-P4-Module-DEV-KIT rev3.2 -> TESmart HKS202-M24 dedicated keyboard port.
-- Input parses keyboard arrays / NKRO bitmaps / Report IDs and merges interfaces. Output is one HID Boot Keyboard, eight-byte 6KRO without Report ID, bcdUSB 0x0110, Full Speed, one-millisecond endpoint interval.
+- Input parses keyboard arrays / NKRO bitmaps / Report IDs and merges interfaces. Default output is one HID Boot Keyboard, eight-byte 6KRO without Report ID, bcdUSB 0x0110, Full Speed, one-millisecond endpoint interval.
 - USB 1.1, HID 1.11, 6KRO and Boot Keyboard describe different things. No single-variable experiment has established the KVM's root cause or controller chip.
 - The C6, Ethernet, Home Assistant, KVM UART and desktop helpers are not required by the standalone configuration.
 - Optional simultaneous Ctrl+Alt+/ becomes sequential RightCtrl, RightCtrl, PageDown with releases and completion checks. This assumes the KVM's default RightCtrl trigger.
@@ -34,3 +35,7 @@ The example enables drain_auxiliary_interfaces to retain/poll receiver auxiliary
 ## Optional hub input
 
 The optional keyboard-bridge-hub.yaml enables a single FS/LS hub. Three socket typing/release passed in the integrated firmware; an error-retry/watchdog follow-up is documented with exact image/test status in docs/compatibility.md. The Waveshare H3 switch selects ONE direct USB-A socket OR THREE CH334 sockets. No firmware can activate all four without changing the physical routing. Read docs/usb-ports.md. The default profile remains direct-only.
+
+## Optional media controls
+
+media_controls defaults false. keyboard-bridge-media.yaml enables hub support plus a second Consumer/System HID interface, while retaining the primary eight-byte/no-Report-ID keyboard shape and extending ordinary usages to 0x91 (F13-F24). Knob volume/mute and Fn media actions passed on the integrated 09495afe application on 2026-10-26. Read docs/media-controls.md for exact test images and standalone status. Fn+Esc also failed to toggle the function row when directly connected to the PC; this project does not implement a raw Fn layer lock. Mouse/vendor traffic is still excluded; v0.1.0 prebuilt firmware predates media support.

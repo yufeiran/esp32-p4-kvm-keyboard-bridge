@@ -261,4 +261,134 @@ int main() {
   assert(report_is_fresh(0x20, 0xFFFFFFF0u, true, 0xFFFFFFE0u));
   assert(!report_is_fresh(0x20, 0xFFFFFFF0u, true, 0x10u));
   std::cout << "PASS fresh-release gate, suspend/reset boundary, stale input and millisecond wrap\n";
+
+  {
+    // Synthetic protocol fixtures only, never a capture of typed input.
+    const uint8_t controls[] = {
+      0x05,0x0C,0x09,0x01,0xA1,0x01,0x85,0x01,0x15,0x00,0x26,0xFF,0x03,
+      0x19,0x00,0x2A,0xFF,0x03,0x75,0x10,0x95,0x02,0x81,0x00,0xC0,
+      0x05,0x01,0x09,0x80,0xA1,0x01,0x85,0x02,0x15,0x00,0x25,0x01,
+      0x19,0x81,0x29,0x83,0x75,0x01,0x95,0x03,0x81,0x02,
+      0x75,0x05,0x95,0x01,0x81,0x03,0xC0,
+      0x05,0x07,0x85,0x03,0x15,0x00,0x25,0x65,0x19,0x00,0x29,0x65,
+      0x75,0x08,0x95,0x06,0x81,0x00,
+      // Relative AC Pan is mouse movement, not a Consumer button.
+      0x05,0x0C,0x85,0x04,0x0A,0x38,0x02,0x15,0x81,0x25,0x7F,
+      0x75,0x08,0x95,0x01,0x81,0x06,
+    };
+    KeyboardDescriptor parsed, disabled;
+    assert(parsed.parse(controls, sizeof(controls), true));
+    assert(parsed.has_keyboard() && parsed.has_controls());
+    assert(disabled.parse(controls, sizeof(controls)) && !disabled.has_controls());
+    const uint8_t volume[] = {1,0xE9,0,0xEA,0};
+    const uint8_t up[] = {1,0,0,0,0};
+    const uint8_t sleep[] = {2,2};
+    const uint8_t wake[] = {2,0};
+    assert(parsed.controls_report(volume, sizeof(volume)));
+    assert(!parsed.keyboard_report(volume, sizeof(volume)));
+    assert(parsed.update(volume, sizeof(volume)));
+    assert(parsed.controls().consumer[0] == 0xE9 && parsed.controls().consumer[1] == 0xEA);
+    assert(parsed.state().bits == KeyState{}.bits);
+    assert(!parsed.update(volume, sizeof(volume)-1));
+    assert(parsed.controls().consumer[0] == 0xE9);
+    assert(parsed.update(sleep, sizeof(sleep)) && parsed.controls().system == 2);
+    assert(parsed.controls().consumer[0] == 0xE9);
+    assert(parsed.update(up, sizeof(up)) && parsed.controls().consumer[0] == 0);
+    assert(parsed.controls().system == 2);
+    assert(parsed.update(wake, sizeof(wake)) && parsed.controls().empty());
+    const uint8_t mouse_pan[] = {4,1};
+    assert(!parsed.controls_report(mouse_pan, sizeof(mouse_pan)));
+    assert(!parsed.update(mouse_pan, sizeof(mouse_pan)));
+    ReleaseGate keyboard_gate;
+    keyboard_gate.arm();
+    assert(parsed.update(up, sizeof(up)));
+    keyboard_gate.observe(parsed.state(), parsed.keyboard_report(up, sizeof(up)));
+    assert(keyboard_gate.waiting()); // Media release cannot unlock keyboard recovery.
+    for (uint8_t key = 0x3A; key <= 0x45; key++) {
+      const uint8_t function[] = {3,key,0,0,0,0,0};
+      assert(parsed.update(function, sizeof(function)));
+      assert(boot_report(parsed.state()).keys[0] == key);
+    }
+    const uint8_t bitmap[] = {0x05,0x0C,0x09,0x01,0xA1,0x01,0x15,0,0x25,1,
+      0x09,0xE2,0x09,0xE9,0x09,0xEA,0x75,1,0x95,3,0x81,2,
+      0x75,5,0x95,1,0x81,3,0xC0};
+    KeyboardDescriptor bits;
+    assert(bits.parse(bitmap, sizeof(bitmap), true) && !bits.has_keyboard());
+    uint8_t value = 2;
+    assert(bits.update(&value, 1) && bits.controls().consumer[0] == 0xE9);
+    value = 0;
+    assert(bits.update(&value, 1) && bits.controls().empty());
+    const uint8_t invalid_bool[] = {0x05,0x0C,0x09,0xE9,0x15,0,0x25,1,
+      0x75,8,0x95,1,0x81,2};
+    assert(bits.parse(invalid_bool, sizeof(invalid_bool), true));
+    value = 2;
+    assert(!bits.update(&value, 1) && bits.controls().empty());
+    ControlState state;
+    assert(state.add(0xE9) && state.add(0xE9) && state.add(0x70));
+    assert(state.consumer[0] == 0x70 && state.consumer[1] == 0xE9 && state.consumer[2] == 0);
+    const auto packet = ControlPacket::consumer(state);
+    assert(packet.id == 1 && packet.length == 16 && packet.data[0] == 0x70 && packet.data[2] == 0xE9);
+    assert(ControlPacket::system(0xFF).data[0] == 7);
+    ControlReleaseGate media_gate;
+    media_gate.arm();
+    media_gate.observe(ControlState{}, false);
+    assert(media_gate.waiting());
+    media_gate.observe(state, true);
+    assert(media_gate.waiting());
+    media_gate.observe(ControlState{}, true);
+    assert(!media_gate.waiting());
+    TimedReportBuffer<ControlPacket> queue;
+    assert(queue.push(packet, 1) && queue.push(ControlPacket{}, 2));
+    assert(queue.front().data[0] == 0x70);
+    queue.pop();
+    assert(queue.front().data[0] == 0); // Preserve short knob press/release edges.
+    assert(queue.stale(103));
+    queue.release(200);
+    assert(queue.size() == 1 && queue.front().data[0] == 0);
+    parsed.update(volume, sizeof(volume));
+    parsed.clear_state();
+    assert(parsed.controls().empty());
+    ControlState full;
+    for (unsigned i = 1; i <= ControlState::CAPACITY; i++) assert(full.add(uint16_t(0x100+i)));
+    assert(!full.add(0x200));
+    std::cout << "PASS Consumer arrays/bitmaps, System controls, Report-ID isolation, F1-F12, relative-mouse exclusion, media release/aging\n";
+  }
+
+
+  {
+    KeyboardDescriptor real_media;
+    assert(real_media.parse(NUPHY_INTERFACE_2, sizeof(NUPHY_INTERFACE_2), true));
+    assert(!real_media.has_keyboard() && real_media.has_controls());
+    const uint8_t up[] = {4,0xE9,0}, down[] = {4,0xEA,0}, mute[] = {4,0xE2,0};
+    const uint8_t release[] = {4,0,0}, brightness[] = {4,0x6F,0};
+    const uint8_t sleep[] = {3,0x82,0}, sys_release[] = {3,0,0};
+    for (auto data : {up,down,mute,brightness}) {
+      assert(real_media.controls_report(data, 3) && real_media.update(data, 3));
+      assert(real_media.controls().consumer[0] == data[1]);
+      assert(real_media.update(release, sizeof(release)) && real_media.controls().empty());
+    }
+    assert(real_media.update(sleep, sizeof(sleep)) && real_media.controls().system == 2);
+    assert(real_media.update(sys_release, sizeof(sys_release)) && real_media.controls().empty());
+    const uint8_t mouse[] = {2,0,1,0,0,0};
+    assert(!real_media.controls_report(mouse, sizeof(mouse)));
+    assert(!real_media.update(mouse, sizeof(mouse)));
+    std::cout << "PASS actual Air75 V3 media descriptor: volume/mute/brightness, System selector and mouse isolation\n";
+  }
+
+
+  {
+    KeyState extended;
+    for (auto usage : {0x68,0x73,0x7F,0x80,0x81,0x91}) {
+      extended = KeyState{};
+      extended.press(usage);
+      assert(boot_report(extended).keys[0] == 0);
+      assert(boot_report(extended, 0x91).keys[0] == usage);
+      SwitchHotkey passthrough;
+      assert(passthrough.filtered_report(extended, 0x91).keys[0] == usage);
+    }
+    extended.press(0x92);
+    assert(boot_report(extended, 0x91).keys[1] == 0);
+    std::cout << "PASS optional F13-F24/Keyboard volume range with unchanged six-key report shape\n";
+  }
+
 }

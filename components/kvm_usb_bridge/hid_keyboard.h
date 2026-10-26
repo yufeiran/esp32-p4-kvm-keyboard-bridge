@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <cstring>
 #include <vector>
+#include "hid_controls.h"
 
 namespace esphome::kvm_usb_bridge {
 
@@ -30,11 +31,11 @@ struct BootReport {
 };
 static_assert(sizeof(BootReport) == 8, "Boot keyboard reports must be exactly eight bytes");
 
-inline BootReport boot_report(const KeyState &state) {
+inline BootReport boot_report(const KeyState &state, uint8_t maximum = 0x65) {
   BootReport result;
   for (unsigned i = 0; i < 8; i++) if (state.down(0xE0 + i)) result.modifiers |= uint8_t(1u << i);
   unsigned count = 0;
-  for (unsigned usage = 4; usage <= 0x65; usage++) {
+  for (unsigned usage = 4; usage <= maximum && usage < 0xE0; usage++) {
     if (!state.down(usage)) continue;
     if (count == 6) {
       // HID ErrorRollOver, rather than silently dropping an arbitrary seventh key.
@@ -69,15 +70,18 @@ class KeyboardDescriptor {
     uint16_t output_bits{0};
     std::vector<Field> keyboard;
     std::vector<Field> leds;
+    std::vector<Field> consumer;
+    std::vector<Field> system;
     KeyState state;
+    ControlState controls;
   };
 
-  bool parse(const uint8_t *data, size_t length) {
+  bool parse(const uint8_t *data, size_t length, bool controls = false) {
     layouts_.clear();
     report_ids_ = false;
     struct Globals {
       uint32_t page{0}, size{0}, count{0};
-      int32_t logical_min{0};
+      int32_t logical_min{0}, logical_max{0};
       uint8_t id{0};
     } g;
     std::array<Globals, 8> stack{};
@@ -108,6 +112,7 @@ class KeyboardDescriptor {
           case 1:
             g.logical_min = size == 1 ? int8_t(value) : size == 2 ? int16_t(value) : int32_t(value);
             break;
+          case 2: g.logical_max = int32_t(value); break;
           case 7: g.size = value; break;
           case 8:
             if (value == 0 || value > 255) return false;
@@ -145,8 +150,15 @@ class KeyboardDescriptor {
           if (offset + g.size * g.count > 8192) return false;
           const uint32_t first_usage = usages.empty() ? (has_range ? usage_min : (g.page << 16)) : usages.front();
           const unsigned page = first_usage >> 16;
+          const bool button = !(value & 2) || (g.logical_min == 0 && g.logical_max == 1);
+          const bool consumer = controls && tag == 8 && page == 12 && !(value & 4) && button;
+          bool system = false;
+          if (controls && tag == 8 && page == 1 && !(value & 4) && button) {
+            for (auto usage : usages) if (usage >= 0x00010081 && usage <= 0x00010083) system = true;
+            if (has_range && usage_min <= 0x00010083 && usage_max >= 0x00010081) system = true;
+          }
           if (!(value & 1) && g.size != 0 && g.count != 0 &&
-              ((tag == 8 && page == 7) || (tag == 9 && page == 8))) {
+              ((tag == 8 && page == 7) || (tag == 9 && page == 8) || consumer || system)) {
             if (++total_fields > 64 || g.count > 256) return false;
             Field f;
             f.bit_offset = offset;
@@ -158,7 +170,7 @@ class KeyboardDescriptor {
             f.usage_min = has_range ? usage_min : first_usage;
             f.usage_max = has_range ? usage_max : first_usage;
             if (f.usage_max < f.usage_min) return false;
-            (tag == 8 ? layout->keyboard : layout->leds).push_back(std::move(f));
+            (consumer ? layout->consumer : system ? layout->system : tag == 8 ? layout->keyboard : layout->leds).push_back(std::move(f));
           }
           offset += uint16_t(g.size * g.count);
         }
@@ -167,7 +179,7 @@ class KeyboardDescriptor {
         has_range = false;
       }
     }
-    return std::any_of(layouts_.begin(), layouts_.end(), [](const Layout &l) { return !l.keyboard.empty(); });
+    return has_keyboard() || has_controls();
   }
 
   bool update(const uint8_t *data, size_t length) {
@@ -175,7 +187,7 @@ class KeyboardDescriptor {
     const uint8_t id = report_ids_ ? *data++ : 0;
     if (report_ids_) length--;
     for (auto &layout : layouts_) {
-      if (layout.id != id || layout.keyboard.empty()) continue;
+      if (layout.id != id || (layout.keyboard.empty() && layout.consumer.empty() && layout.system.empty())) continue;
       if (length < (layout.input_bits + 7u) / 8u) return false;
       KeyState next;
       for (const auto &f : layout.keyboard) {
@@ -197,7 +209,30 @@ class KeyboardDescriptor {
           if ((usage >> 16) == 7) next.press(usage & 0xFFFF);
         }
       }
+      ControlState next_controls;
+      for (const auto *fields : {&layout.consumer, &layout.system}) {
+        for (const auto &f : *fields) for (unsigned i = 0; i < f.count; i++) {
+          const uint32_t value = read_bits_(data, f.bit_offset + i * f.size, f.size);
+          uint32_t usage = 0;
+          if (f.variable) {
+            if (value > 1) return false;
+            if (value == 0) continue;
+            usage = f.usage_at(i);
+          } else {
+            const int64_t index = int64_t(value) - f.logical_min;
+            if (index < 0 || (!f.usages.empty() && uint64_t(index) >= f.usages.size()) ||
+                (f.usages.empty() && uint64_t(index) > f.usage_max - f.usage_min)) continue;
+            usage = f.usage_at(uint32_t(index));
+          }
+          if ((usage >> 16) == 12 && !next_controls.add(uint16_t(usage))) return false;
+          if (usage >= 0x00010081 && usage <= 0x00010083)
+            next_controls.system |= 1u << (usage - 0x00010081);
+        }
+      }
+      ControlState merged = next_controls;
+      for (const auto &other : layouts_) if (&other != &layout && !merged.merge(other.controls)) return false;
       layout.state = next;
+      layout.controls = next_controls;
       return true;
     }
     return false;
@@ -208,8 +243,30 @@ class KeyboardDescriptor {
     for (const auto &layout : layouts_) merged.merge(layout.state);
     return merged;
   }
+  bool has_keyboard() const {
+    for (const auto &layout : layouts_) if (!layout.keyboard.empty()) return true;
+    return false;
+  }
+  bool has_controls() const {
+    for (const auto &layout : layouts_) if (!layout.consumer.empty() || !layout.system.empty()) return true;
+    return false;
+  }
+  bool keyboard_report(const uint8_t *data, size_t length) const {
+    const auto *layout = input_layout_(data, length);
+    return layout != nullptr && !layout->keyboard.empty();
+  }
+  bool controls_report(const uint8_t *data, size_t length) const {
+    const auto *layout = input_layout_(data, length);
+    return layout != nullptr && (!layout->consumer.empty() || !layout->system.empty());
+  }
+  ControlState controls() const {
+    ControlState result;
+    for (const auto &layout : layouts_) if (!result.merge(layout.controls)) return ControlState{};
+    return result;
+  }
+  void clear_controls() { for (auto &layout : layouts_) layout.controls = ControlState{}; }
   const std::vector<Layout> &layouts() const { return layouts_; }
-  void clear_state() { for (auto &layout : layouts_) layout.state = KeyState{}; }
+  void clear_state() { for (auto &layout : layouts_) { layout.state = KeyState{}; layout.controls = ControlState{}; } }
   bool has_report_ids() const { return report_ids_; }
 
   // Produce the complete SET_REPORT payload, including an ID byte when present.
@@ -232,6 +289,12 @@ class KeyboardDescriptor {
   }
 
  private:
+  const Layout *input_layout_(const uint8_t *data, size_t length) const {
+    if (length == 0) return nullptr;
+    const uint8_t id = report_ids_ ? data[0] : 0;
+    for (const auto &layout : layouts_) if (layout.id == id) return &layout;
+    return nullptr;
+  }
   Layout *get_layout_(uint8_t id) {
     for (auto &layout : layouts_) if (layout.id == id) return &layout;
     if (layouts_.size() == 16) return nullptr;

@@ -17,9 +17,9 @@ flowchart LR
 
 It runs on the P4 itself: **no keyboard firmware modification, C6 firmware, computer helper, Home Assistant or network connection is required**. An optional simultaneous **Ctrl+Alt+/** shortcut can ask the TESmart KVM to select its next input.
 
-**Verified scope:** one Air75 V3 receiver, one HKS202-M24 and the production-rev3 Waveshare board. Other keyboards and KVMs need testing. Media keys, mouse forwarding, RGB/configuration traffic and more than six simultaneous ordinary keys are outside this version's scope. See [compatibility and test evidence](docs/compatibility.md).
+**Verified scope:** one Air75 V3 receiver, one HKS202-M24 and the production-rev3 Waveshare board. Other keyboards and KVMs need testing. Media forwarding is available in an optional profile. Mouse forwarding, RGB/configuration traffic and more than six simultaneous ordinary keys remain outside this version's scope. See [compatibility and test evidence](docs/compatibility.md).
 
-Ordinary output usages are limited to `0x04–0x65`; extended keys such as F13–F24 are not forwarded.
+The default keyboard-only profile outputs usages `0x04–0x65`. The optional media profile extends this to `0x91`, including F13–F24, and adds Consumer/System controls; see [media controls and evidence](docs/media-controls.md).
 
 ### Long-idle recovery update (2026-10-19)
 
@@ -35,12 +35,16 @@ A keyboard power cycle with its receiver left on P4 reproduced stuck Backspace; 
 
 The integrated firmware passed **three keyboard-off/on and held-Backspace release cycles**, bidirectional switching and post-switch typing. This is an improvement on a captured trigger, not an overnight stability claim or proof of the exact receiver/host mechanism. The original v0.1.0 binary also predates this change. See [evidence and diagnostics](docs/reliability.md).
 
+### Media controls update (2026-10-26)
+
+The Air75 V3 volume knob and Fn media actions were previously discarded as non-keyboard input. The optional `media_controls: true` profile decodes those standard HID controls and sends them over a separate interface, keeping the primary keyboard's eight-byte, no-Report-ID format. The tester confirmed knob volume/mute and Fn media actions through the HKS202-M24 dedicated keyboard port. Fn-layer selection remains inside the keyboard; Fn+Esc also failed to toggle the function row when connected directly to the PC. [Implementation, limits and exact tested images](docs/media-controls.md).
+
 ## 2. How it works
 
 P4 acts as two different USB participants at once:
 
 1. **Host towards the real keyboard.** Read the HID report descriptor, decode key arrays or NKRO bitmaps, handle Report IDs and merge keyboard interfaces into a common pressed-key state.
-2. **Device towards the KVM.** Enumerate as one HID Boot Keyboard interface and emit an **8-byte report: modifier byte, reserved byte, six key usages**. The output has **no Report ID**.
+2. **Device towards the KVM.** By default, enumerate as one HID Boot Keyboard interface and emit an **8-byte report: modifier byte, reserved byte, six key usages**. The output has **no Report ID**.
 
 The KVM sees the bridge's new USB device, not the original keyboard's composite descriptors. This is report translation and device re-enumeration; changing a USB version number alone would not do the job.
 
@@ -108,6 +112,10 @@ kvm_usb_bridge:
 ```
 
 Either left/right Ctrl and Alt are accepted; all six arrival orders of the three keys are handled. Shift/GUI-modified variants are excluded. One hold triggers once, a short debounce prevents repeats, and a canceled macro is never replayed after reconnection. On macOS the physical Alt key is usually labeled Option; the firmware matches HID usages, not OS characters. Slash means the standard slash key (usage `0x38`), not keypad divide.
+
+### Optional media profile
+
+Build `python -m esphome compile keyboard-bridge-media.yaml` for offline hub input plus media controls, then audit with `--hub --media`. This example keeps the KVM shortcut disabled. It adds Consumer controls on interface 1; the baseline example keeps its original single keyboard interface. Other KVMs may reject or ignore the extra interface. See [media controls](docs/media-controls.md) for exact scope.
 
 ### Code map
 

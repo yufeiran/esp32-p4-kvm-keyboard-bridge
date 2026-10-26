@@ -29,7 +29,7 @@ With ESP-IDF 5.5.4, enabling hub support alone leaves an HS hub needing split tr
 
 ESP-USB 1.6.0 exposes `fsls_only`, but requires new HAL support absent from the pinned IDF 5.5.4. To keep the tested SDK, the optional profile wraps `hcd_port_command()` and sets `HCFG.FSLSSupp` immediately before every root-port RESET command, including resets after core recovery. Setting it at HAL initialization was tested and failed because the bit did not survive until enumeration. The original HCD command still runs. The bridge installs HCD only for controller 0 (HS input); controller 1 uses TinyUSB for FS KVM output and is untouched. No installed SDK files are patched. The shim declares the pinned private HCD ABI (`void*`, 32-bit command enum, RESET=2) and rejects every IDF version other than 5.5.4 at compile time and must be revalidated when changing the SDK. The direct-only build does not link this wrapper.
 
-Only a single hub level is enabled. The existing pool has eight HID-interface slots, and auxiliary receiver interfaces consume slots too. Supporting three sockets does not promise three composite receivers simultaneously; hardware channels, power and interface count still limit concurrent devices. Mouse/media/vendor payloads are not forwarded.
+Only a single hub level is enabled. The existing pool has eight HID-interface slots, and auxiliary receiver interfaces consume slots too. Supporting three sockets does not promise three composite receivers simultaneously; hardware channels, power and interface count still limit concurrent devices. Mouse/vendor payloads are not forwarded; media controls require the separate opt-in [media profile](media-controls.md).
 
 ## 中文
 
@@ -37,7 +37,7 @@ Only a single hub level is enabled. The existing pool has eight HID-interface sl
 
 这块板不是四个口都接在 Hub 上：三个 USB-A 接 CH334 的第 1–3 路，第 4 路只引到 TP1/TP2。剩下一个 USB-A 是直连口，通过 FSUSB42 模拟开关与 Hub 上游二选一。H3 的 HOST 侧选择直连口，DEVICE 侧选择 Hub 的三个口。DEVICE 是板上丝印，使用本固件时 P4 仍是主机。软件无法绕过这个物理跳线；不改硬件不能让四个口同时接通。
 
-本实现保留 ESP-IDF 5.5.4，不升级整套 SDK。可选模式通过链接包装器，在每次 HCD 根端口 RESET 命令之前设置 `HCFG.FSLSSupp`，包括核心恢复后的再次复位。曾实测初始化时设置无法保留到枚举，已改为复位前设置。FS 输出控制器不受影响，也不改本机 SDK 文件。包装器使用固定的私有 HCD ABI，编译时只接受 ESP-IDF 5.5.4，更换 SDK 必须重新验证。单层 Hub、八个 HID 接口槽和硬件通道仍有容量限制，不代表能同时接三只复合接收器。鼠标、多媒体和厂商数据仍不转发。
+本实现保留 ESP-IDF 5.5.4，不升级整套 SDK。可选模式通过链接包装器，在每次 HCD 根端口 RESET 命令之前设置 `HCFG.FSLSSupp`，包括核心恢复后的再次复位。曾实测初始化时设置无法保留到枚举，已改为复位前设置。FS 输出控制器不受影响，也不改本机 SDK 文件。包装器使用固定的私有 HCD ABI，编译时只接受 ESP-IDF 5.5.4，更换 SDK 必须重新验证。单层 Hub、八个 HID 接口槽和硬件通道仍有容量限制，不代表能同时接三只复合接收器。鼠标和厂商数据仍不转发；媒体控制需要单独启用[媒体配置](media-controls.md)。
 
 ## Primary references
 

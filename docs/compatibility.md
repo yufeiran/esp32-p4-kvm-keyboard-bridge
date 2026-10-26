@@ -26,16 +26,22 @@ The tester confirmed typing and immediate Backspace release through each of the 
 
 [Board topology and exact limits](usb-ports.md).
 
+## Optional media controls (2026-10-26)
+
+The tester confirmed volume knob up/down, mute and Fn media actions with the integrated `09495afe…` application through the same receiver/P4/HKS202-M24 dedicated-port path. Fn+Esc did not toggle function-row behavior with the receiver directly on the PC either. Media is opt-in; the default keyboard-only descriptor stays unchanged. Exact images, scope and standalone-build status are recorded in [media controls](media-controls.md).
+
+使用者确认：集成应用 `09495afe…` 经过同一接收器、P4 和 HKS202-M24 专用键盘口时，旋钮音量、静音及 Fn 媒体动作恢复。接收器直连 PC 时 Fn+Esc 同样无法切换功能行。媒体转发需要显式启用，默认纯键盘描述符保持不变。确切镜像、范围和独立配置的构建状态见[媒体按键说明](media-controls.md)。
+
 ## Automated checks
 
 - Traditional boot report: modifiers, padding, key arrays, LED encoding and release.
 - 144-bit NKRO bitmap to 6KRO, seventh-key rollover and recovery.
 - Report IDs, Push/Pop, consumer-usage isolation and interface merge.
 - Error-state preservation, disconnect release, malformed/truncated input.
-- Both actual Air75 V3 receiver descriptors and input report sizes.
+- Three actual Air75 V3 receiver descriptors, including the mixed mouse/System/Consumer interface, and input report sizes.
 - 10,000 deterministic randomized/malformed descriptor cases.
 - Optional hotkey: disabled passthrough, exact seven-packet macro, completion/30 ms barriers, all six chord orders, left/right Ctrl/Alt, exclusion of Shift/GUI, held-key suppression, debounce, timeout/cancel without replay, timer wrap and early physical release.
-- Linked-ELF audit: USB 1.10, one Boot Keyboard interface, HID 1.11, no Report ID, 8-byte IN endpoint and 1 ms interval.
+- Linked-ELF audit: USB 1.10, primary Boot Keyboard interface, HID 1.11, no primary Report ID, 8-byte IN endpoint and 1 ms interval; optional second media interface, independent Report IDs and 32-byte endpoint.
 
 The host tests exercise parser and state-machine behavior. They do not simulate USB bus scheduling, electrical behavior or the KVM's firmware.
 

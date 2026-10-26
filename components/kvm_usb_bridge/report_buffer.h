@@ -8,12 +8,12 @@ namespace esphome::kvm_usb_bridge {
 // typing backlog after the KVM wakes or starts polling again.
 constexpr uint32_t MAX_REPORT_AGE_MS = 100;
 
-class ReportBuffer {
+template<typename Report> class TimedReportBuffer {
  public:
   static constexpr size_t CAPACITY = 64;
   void clear() { head_ = count_ = 0; }
-  void release(uint32_t now) { clear(); push(BootReport{}, now); }
-  bool push(const BootReport &report, uint32_t now) {
+  void release(uint32_t now) { clear(); push(Report{}, now); }
+  bool push(const Report &report, uint32_t now) {
     if (count_ == CAPACITY) {
       release(now); // Release-only recovery, not a replay of the latest held key.
       return false;
@@ -22,7 +22,7 @@ class ReportBuffer {
     count_++;
     return true;
   }
-  const BootReport &front() const { return entries_[head_].report; }
+  const Report &front() const { return entries_[head_].report; }
   void pop() {
     if (count_ != 0) { head_ = (head_ + 1) % CAPACITY; count_--; }
   }
@@ -32,10 +32,12 @@ class ReportBuffer {
   bool stale(uint32_t now) const { return !empty() && age(now) > MAX_REPORT_AGE_MS; }
 
  private:
-  struct Entry { BootReport report; uint32_t at{0}; };
+  struct Entry { Report report; uint32_t at{0}; };
   std::array<Entry, CAPACITY> entries_{};
   size_t head_{0}, count_{0};
 };
+
+using ReportBuffer = TimedReportBuffer<BootReport>;
 
 class ReleaseGate {
  public:

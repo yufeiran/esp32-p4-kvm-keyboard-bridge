@@ -49,12 +49,18 @@ class KVMUSBBridge : public Component {
   void set_switch_hotkey(bool value) { switch_hotkey_.set_enabled(value); }
   void set_trace_key_counts(bool value) { trace_key_counts_ = value; }
   void set_drain_auxiliary_interfaces(bool value) { drain_auxiliary_interfaces_ = value; }
+  void set_media_controls(bool value) { media_controls_ = value; }
+  ControlState current_controls();
+  void controls_delivered() { media_delivered_.fetch_add(1); media_in_flight_.store(false); }
+  void controls_failed() { media_failed_.store(true); media_in_flight_.store(false); }
+  void set_media_idle(uint8_t value) { media_idle_rate_.store(value); }
   BootReport current_report();
 
  protected:
   struct Slot {
     KVMUSBBridge *owner{nullptr};
     std::atomic<bool> keyboard{false};
+    std::atomic<bool> media{false};
     hid_host_device_handle_t handle{nullptr};
     KeyboardDescriptor descriptor;
     bool led_pending{false};
@@ -93,6 +99,9 @@ class KVMUSBBridge : public Component {
   void handle_input_(const Event &event);
   void recompute_(bool fresh_physical_report = false);
   void service_output_();
+  void recompute_controls_(bool fresh_control_report = false);
+  void recover_controls_();
+  void service_controls_();
   bool send_report_(const BootReport &report);
   void abort_switch_(const char *reason);
   void recover_output_(const char *reason, bool clear_inputs = false);
@@ -104,6 +113,14 @@ class KVMUSBBridge : public Component {
                      uint32_t sequence, uint32_t age, uint8_t queued);
   std::array<Slot, 8> slots_;
   ReportBuffer reports_;
+  TimedReportBuffer<ControlPacket> media_reports_;
+  ControlReleaseGate media_gate_;
+  ControlState desired_controls_{}, last_controls_{};
+  uint32_t media_last_send_ms_{0};
+  std::atomic<bool> media_in_flight_{false}, media_failed_{false}, media_waiting_{false};
+  std::atomic<uint32_t> media_queued_{0};
+  std::atomic<uint8_t> media_idle_rate_{0}, media_count_{0};
+  std::atomic<uint32_t> media_received_{0}, media_delivered_{0}, media_dropped_{0};
   ReleaseGate release_gate_;
   QueueHandle_t events_{nullptr};
   QueueHandle_t controls_{nullptr};
@@ -164,6 +181,7 @@ class KVMUSBBridge : public Component {
   bool dump_descriptors_{false};
   bool trace_key_counts_{false};
   bool drain_auxiliary_interfaces_{false};
+  bool media_controls_{false};
   SwitchHotkey switch_hotkey_;
 };
 

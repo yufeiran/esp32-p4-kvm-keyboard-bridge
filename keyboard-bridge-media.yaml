@@ -1,0 +1,7 @@
+# Optional media controls over a second HID interface; offline, hotkey off.
+# Includes the single-hub profile: H3 DEVICE for CH334 sockets, HOST for direct.
+packages:
+  base: !include keyboard-bridge-hub.yaml
+
+kvm_usb_bridge:
+  media_controls: true

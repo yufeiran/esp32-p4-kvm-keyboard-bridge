@@ -20,6 +20,8 @@ jobs:
             audit_flags: ''
           - config: keyboard-bridge-hub.yaml
             audit_flags: --hub
+          - config: keyboard-bridge-media.yaml
+            audit_flags: --hub --media
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

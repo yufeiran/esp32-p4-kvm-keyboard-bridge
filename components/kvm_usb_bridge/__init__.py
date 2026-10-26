@@ -24,6 +24,7 @@ CONFIG_SCHEMA = cv.All(
         cv.Optional("switch_hotkey", default=False): cv.boolean,
         cv.Optional("trace_key_counts", default=False): cv.boolean,
         cv.Optional("drain_auxiliary_interfaces", default=False): cv.boolean,
+        cv.Optional("media_controls", default=False): cv.boolean,
     }).extend(cv.COMPONENT_SCHEMA),
     esp32.only_on_variant(supported=[esp32.VARIANT_ESP32P4]),
 )
@@ -52,11 +53,14 @@ async def to_code(config):
     cg.add(var.set_switch_hotkey(config["switch_hotkey"]))
     cg.add(var.set_trace_key_counts(config["trace_key_counts"]))
     cg.add(var.set_drain_auxiliary_interfaces(config["drain_auxiliary_interfaces"]))
+    cg.add(var.set_media_controls(config["media_controls"]))
+    if config["media_controls"]:
+        cg.add_define("USE_KVM_USB_MEDIA")
     esp32.add_idf_component(name="espressif/esp_tinyusb", ref="2.1.1")
     esp32.add_idf_component(name="espressif/usb_host_hid", ref="1.1.0")
     esp32.include_builtin_idf_component("usb")
     esp32.add_idf_sdkconfig_option("CONFIG_TINYUSB_HID_ENABLED", True)
-    esp32.add_idf_sdkconfig_option("CONFIG_TINYUSB_HID_COUNT", 1)
+    esp32.add_idf_sdkconfig_option("CONFIG_TINYUSB_HID_COUNT", 2 if config["media_controls"] else 1)
     esp32.add_idf_sdkconfig_option("CONFIG_TINYUSB_HID_BUFSIZE", 64)
     esp32.add_idf_sdkconfig_option("CONFIG_TINYUSB_SUSPEND_CALLBACK", True)
     esp32.add_idf_sdkconfig_option("CONFIG_TINYUSB_RESUME_CALLBACK", True)
