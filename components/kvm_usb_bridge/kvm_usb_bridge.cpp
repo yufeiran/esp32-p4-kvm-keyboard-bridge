@@ -37,6 +37,12 @@ static uint16_t key_counts(const BootReport &report) {
   for (unsigned i = 0; i < 8; i++) if (report.modifiers & (1u << i)) result += 0x100;
   return result;
 }
+static uint16_t control_counts(const ControlState &state) {
+  uint16_t result = 0;
+  for (auto usage : state.consumer) if (usage != 0) result++;
+  for (unsigned i = 0; i < 3; i++) if (state.system & (1u << i)) result += 0x100;
+  return result;
+}
 
 // The primary keyboard stays an independent Boot interface with no Report ID.
 static const uint8_t REPORT_DESCRIPTOR[] = {
@@ -473,9 +479,23 @@ void KVMUSBBridge::handle_input_(const Event &queued) {
     const bool keys = slot->descriptor.keyboard_report(queued.data, queued.length);
     const bool media = slot->descriptor.controls_report(queued.data, queued.length);
     if (!keys && !media) { auxiliary_reports_.fetch_add(1); return; }
+    const auto previous_controls = slot->descriptor.controls();
     if (slot->descriptor.update(queued.data, queued.length)) {
       if (keys) received_.fetch_add(1);
-      if (media) media_received_.fetch_add(1);
+      if (media) {
+        const uint32_t sequence = media_received_.fetch_add(1) + 1;
+        const auto controls = slot->descriptor.controls();
+        if (controls != previous_controls) {
+          if (!previous_controls.empty() && controls.empty()) {
+            const uint32_t width = queued.at_ms - slot->media_changed_at_ms;
+            if (width < media_min_pulse_ms_.load()) media_min_pulse_ms_.store(width);
+            if (width > media_max_pulse_ms_.load()) media_max_pulse_ms_.store(width);
+          }
+          slot->media_changed_at_ms = queued.at_ms;
+        }
+        trace_counts_(4, slot->interface_number, control_counts(controls), queued.at_ms,
+                      sequence, millis() - queued.at_ms, media_reports_.size());
+      }
       const uint32_t age = millis() - queued.at_ms;
       if (age > max_input_age_ms_.load()) max_input_age_ms_.store(age);
       const auto counts = key_counts(slot->descriptor.state());
@@ -659,8 +679,11 @@ ControlState KVMUSBBridge::current_controls() {
 
 void KVMUSBBridge::recover_controls_() {
   if (!media_controls_) return;
-  for (auto &slot : slots_) slot.descriptor.clear_controls();
-  media_gate_.arm();
+  media_gate_.arm_if_held(last_controls_);
+  for (auto &slot : slots_) {
+    media_gate_.arm_if_held(slot.descriptor.controls());
+    slot.descriptor.clear_controls();
+  }
   media_reports_.clear();
   media_reports_.push(ControlPacket{}, millis());
   media_reports_.push(ControlPacket::system(0), millis());
@@ -678,15 +701,18 @@ void KVMUSBBridge::recompute_controls_(bool fresh_control_report) {
       media_dropped_.fetch_add(1); recover_controls_(); return;
     }
   }
-  if (switch_hotkey_.suppressing_physical()) { media_gate_.arm(); state = ControlState{}; }
-  else {
-    media_gate_.observe(state, fresh_control_report);
-    if (media_gate_.waiting()) state = ControlState{};
+  media_gate_.observe(state, fresh_control_report);
+  if (switch_hotkey_.suppressing_physical()) { media_gate_.arm_if_held(state); state = ControlState{}; }
+  else if (media_gate_.waiting()) {
+    if (!state.empty()) media_gate_blocked_.fetch_add(1);
+    state = ControlState{};
   }
   portENTER_CRITICAL(&state_mux_);
   desired_controls_ = state;
   portEXIT_CRITICAL(&state_mux_);
   bool ok = true;
+  if (state != last_controls_)
+    trace_counts_(5, 0, control_counts(state), millis(), media_received_.load(), 0, media_reports_.size());
   if (state.consumer != last_controls_.consumer) ok = media_reports_.push(ControlPacket::consumer(state), millis());
   if (ok && state.system != last_controls_.system) ok = media_reports_.push(ControlPacket::system(state.system), millis());
   last_controls_ = state;
@@ -696,7 +722,9 @@ void KVMUSBBridge::recompute_controls_(bool fresh_control_report) {
 void KVMUSBBridge::service_controls_() {
 #ifdef USE_KVM_USB_MEDIA
   const auto now = millis();
-  if (!mounted_.load()) { media_reports_.clear(); media_gate_.arm(); return; }
+  // Lifecycle recovery quarantines controls that were actually held. Arming
+  // unconditionally while idle would swallow a new knob action after attach.
+  if (!mounted_.load()) { media_reports_.clear(); return; }
   if (media_failed_.exchange(false)) { media_dropped_.fetch_add(1); recover_controls_(); }
   if (media_reports_.stale(now)) { media_dropped_.fetch_add(media_reports_.size()); recover_controls_(); }
   // Consumer endpoint failure must never reset the working keyboard endpoint.
@@ -710,11 +738,30 @@ void KVMUSBBridge::service_controls_() {
   }
   if (media_reports_.empty()) return;
   const auto packet = media_reports_.front();
+  media_submitted_at_ms_.store(now);
   media_in_flight_.store(true);
   if (tud_hid_n_report(1, packet.id, packet.data.data(), packet.length)) {
     media_reports_.pop(); media_last_send_ms_ = now;
   } else media_in_flight_.store(false);
 #endif
+}
+
+void KVMUSBBridge::controls_delivered(const uint8_t *report, uint16_t length) {
+  const uint32_t now = millis();
+  const uint32_t sequence = media_delivered_.fetch_add(1) + 1;
+  uint16_t counts = 0;
+  uint8_t id = 0;
+  if (report != nullptr && length != 0) {
+    id = report[0];
+    if (id == 1 && length == 17) {
+      for (unsigned i = 1; i < 17; i += 2) if (report[i] || report[i + 1]) counts++;
+    } else if (id == 2 && length == 2) {
+      for (unsigned i = 0; i < 3; i++) if (report[1] & (1u << i)) counts += 0x100;
+    }
+  }
+  trace_counts_(6, id, counts, now, sequence, now - media_submitted_at_ms_.load(), 0);
+  // Read the completed buffer before another submission can overwrite it.
+  media_in_flight_.store(false);
 }
 
 void KVMUSBBridge::trace_counts_(uint8_t stage, uint8_t source, uint16_t counts,
@@ -829,6 +876,13 @@ void KVMUSBBridge::loop() {
                  trace.source, trace.counts, unsigned(trace.age_ms));
         continue;
       }
+      if (trace.stage >= 4 && trace.stage <= 6) {
+        const char *stage = trace.stage == 4 ? "INPUT" : trace.stage == 5 ? "DESIRED" : "ACK";
+        ESP_LOGI(TAG, "MEDIA %s t=%u seq=%u source=%u active=%u system=%u age=%ums queued=%u",
+                 stage, unsigned(trace.at_ms), unsigned(trace.sequence), trace.source,
+                 trace.counts & 0xFF, trace.counts >> 8, unsigned(trace.age_ms), trace.queued);
+        continue;
+      }
       const char *stage = trace.stage == 0 ? "INPUT" : trace.stage == 1 ? "DESIRED" : "ACK";
       ESP_LOGI(TAG, "COUNT %s t=%u seq=%u source=%u held=%u mods=%u age=%ums queued=%u",
                stage, unsigned(trace.at_ms), unsigned(trace.sequence), trace.source,
@@ -857,6 +911,9 @@ void KVMUSBBridge::loop() {
     if (media_controls_) ESP_LOGD(TAG, "Media: interfaces=%u accepted=%u delivered=%u dropped=%u queued=%u in-flight=%u gate=%u",
              media_count_.load(), media_received_.load(), media_delivered_.load(), media_dropped_.load(),
              media_queued_.load(), media_in_flight_.load(), media_waiting_.load());
+    if (media_controls_) ESP_LOGD(TAG, "Media timing: gate-blocked=%u input-pulse-min=%ums input-pulse-max=%ums",
+             media_gate_blocked_.load(), media_min_pulse_ms_.load() == UINT32_MAX ? 0 : media_min_pulse_ms_.load(),
+             media_max_pulse_ms_.load());
     ESP_LOGD(TAG, "Auxiliary drain: interfaces=%u reports=%u errors=%u", auxiliary_count_.load(),
              auxiliary_reports_.load(), auxiliary_errors_.load());
     ESP_LOGD(TAG, "USB state: HS root=%08X FS/LS-only=%u FS config=%08X status=%08X control=%08X PHY-swap=%u",
@@ -941,7 +998,7 @@ void tud_hid_report_complete_cb(uint8_t instance, uint8_t const *report, uint16_
   using namespace esphome::kvm_usb_bridge;
   if (bridge_instance == nullptr) return;
   if (instance == 0) bridge_instance->report_delivered(report, length);
-  if (instance == 1) bridge_instance->controls_delivered();
+  if (instance == 1) bridge_instance->controls_delivered(report, length);
 }
 
 void tud_hid_report_failed_cb(uint8_t instance, hid_report_type_t type, uint8_t const *, uint16_t) {

@@ -59,6 +59,10 @@ struct ControlPacket {
 class ControlReleaseGate {
  public:
   void arm() { waiting_ = true; }
+  // An idle recovery has no held control to quarantine. Requiring a new zero
+  // there consumes the first real encoder pulse; repeated recovery must still
+  // retain an existing quarantine until a physical release arrives.
+  void arm_if_held(const ControlState &state) { waiting_ = waiting_ || !state.empty(); }
   bool waiting() const { return waiting_; }
   void observe(const ControlState &state, bool fresh_control_report) {
     if (fresh_control_report && state.empty()) waiting_ = false;

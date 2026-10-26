@@ -37,7 +37,7 @@ The integrated firmware passed **three keyboard-off/on and held-Backspace releas
 
 ### Media controls update (2026-10-26)
 
-The Air75 V3 volume knob and Fn media actions were previously discarded as non-keyboard input. The optional `media_controls: true` profile decodes those standard HID controls and sends them over a separate interface, keeping the primary keyboard's eight-byte, no-Report-ID format. The tester confirmed knob volume/mute and Fn media actions through the HKS202-M24 dedicated keyboard port. Fn-layer selection remains inside the keyboard; Fn+Esc also failed to toggle the function row when connected directly to the PC. [Implementation, limits and exact tested images](docs/media-controls.md).
+The Air75 V3 volume knob and Fn media actions were previously discarded as non-keyboard input. The optional `media_controls: true` profile decodes those standard HID controls and sends them over a separate interface, keeping the primary keyboard's eight-byte, no-Report-ID format. The tester confirmed knob volume/mute and Fn media actions through the HKS202-M24 dedicated keyboard port. Fn-layer selection remains inside the keyboard; the owner found **Fn+X+F** toggles the function row on this Air75 V3. A later first-action/idle-delay investigation is recorded separately. [Implementation, limits and exact tested images](docs/media-controls.md).
 
 ## 2. How it works
 

@@ -391,4 +391,26 @@ int main() {
     std::cout << "PASS optional F13-F24/Keyboard volume range with unchanged six-key report shape\n";
   }
 
+  {
+    ControlReleaseGate gate;
+    ControlState idle, held;
+    assert(held.add(0xE9));
+    gate.arm_if_held(idle);
+    gate.observe(held, true);
+    assert(!gate.waiting()); // First real knob pulse after idle attach is usable.
+    gate.arm_if_held(held);
+    assert(gate.waiting()); // A genuinely held control still needs release.
+    gate.arm_if_held(idle);
+    gate.observe(idle, false);
+    assert(gate.waiting()); // Repeated recovery/synthetic zero cannot unlock it.
+    gate.observe(held, true);
+    assert(gate.waiting());
+    gate.observe(idle, true);
+    assert(!gate.waiting());
+    gate.arm_if_held(idle);
+    gate.observe(held, true);
+    assert(!gate.waiting()); // First new pulse after the release is usable too.
+    std::cout << "PASS media idle recovery keeps first pulse, held controls retain physical-release quarantine\n";
+  }
+
 }

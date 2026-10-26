@@ -6,9 +6,9 @@ On 2026-10-26 the tester confirmed the NuPhy Air75 V3 receiver's volume knob, mu
 
 2026-10-26，使用者确认 NuPhy Air75 V3 接收器经过微雪 P4 和 TESmart HKS202-M24 专用键盘口时，音量旋钮、静音与 Fn 媒体动作恢复，普通打字也正常。此前这些非键盘用途码被桥接程序丢弃。此结果只覆盖实际测试的组合。
 
-**Fn+Esc:** the tester also tried the receiver directly on the PC; this shortcut did not toggle F-key/media behavior there either. That behavior is therefore not introduced by P4. The keyboard normally resolves its own Fn layers before sending HID input; this project cannot infer a physical Fn press from an ordinary Esc report. Configure the keyboard's layers with its own tool when a different function-row layout is wanted. No alternate shortcut or keyboard firmware change was validated here.
+**Function-row toggle:** the tester found that **Fn+X+F** toggles F-key/media behavior on this Air75 V3. Fn+Esc did not toggle it when connected directly to the PC either. The keyboard resolves its own Fn layers before sending HID input; this project cannot infer a physical Fn press from an ordinary Esc report. No NuPhy firmware or keymap was changed by this project.
 
-**Fn+Esc：**相同接收器直连 PC 时也不能切换 F 区／媒体功能，因此不是 P4 引入的故障。Fn 通常在键盘内部选择层，发给 P4 的已经是处理后的 HID 动作；普通 Esc 报告不能证明物理 Fn 是否按下。需要不同的功能行布局时，应在键盘自己的配置工具中设置。这里没有验证另一组切换快捷键，也没有修改 NuPhy 固件。
+**功能行切换：**使用者已找到这把 Air75 V3 的切换方式为 **Fn+X+F**。Fn+Esc 直连 PC 也无效。Fn 在键盘内部选择层，发给 P4 的已经是处理后的 HID 动作；普通 Esc 报告不能证明物理 Fn 是否按下。本项目没有修改 NuPhy 固件或键位配置。
 
 ## How it works / 原理
 
@@ -24,9 +24,9 @@ The input descriptor parser recognizes absolute Consumer arrays/bitmaps and Gene
 | System output / 系统输出 | Same interface, Report ID 2, Power/Sleep/Wake bits / 同一接口，电源／休眠／唤醒三个位 |
 | Control endpoint / 控制端点 | `0x82`, 32 bytes max, 1ms interval / 最大 32 字节，间隔 1ms |
 
-Media has its own bounded queue, completion state and physical-release gate. Old transitions expire after 100ms. A media endpoint failure does not reset a working keyboard endpoint. Recovery may consume the first media action until its release arrives. Fn-layer switching, proprietary vendor commands, RGB configuration and mouse movement are not translated. An OS may ignore brightness or other usages depending on the selected computer/display.
+Media has its own bounded queue, completion state and physical-release gate. Old transitions expire after 100ms. A media endpoint failure does not reset a working keyboard endpoint. Controls held at recovery remain quarantined until a fresh physical release; idle recovery allows the first new encoder pulse through. Fn-layer switching, proprietary vendor commands, RGB configuration and mouse movement are not translated. An OS may ignore brightness or other usages depending on the selected computer/display.
 
-媒体使用独立的有界队列、完成状态和物理松键门控，超过 100ms 的旧变化丢弃。媒体端点故障不会重置正常工作的键盘端点；恢复时可能消耗第一次媒体动作，收到松开后再按即可。Fn 层切换、厂商私有命令、RGB 配置及鼠标移动不在转换范围。亮度等功能是否生效还取决于当前电脑、操作系统和显示器。
+媒体使用独立的有界队列、完成状态和物理松键门控，超过 100ms 的旧变化丢弃。媒体端点故障不会重置正常工作的键盘端点；恢复时仍按住的媒体键必须先真实松开，空闲状态恢复则直接接受下一次新旋钮动作。Fn 层切换、厂商私有命令、RGB 配置及鼠标移动不在转换范围。亮度等功能是否生效还取决于当前电脑、操作系统和显示器。
 
 ## Implementation and tests / 实现与验证
 
@@ -55,6 +55,20 @@ Static descriptors and aggregate counters are sufficient for diagnostics. Typed 
 
 诊断仅使用静态描述符和汇总计数，仓库不包含输入报告、文字或私人配置。
 
+### First encoder action after recovery / 恢复后的第一格
+
+A follow-up report described an unresponsive first detent, sometimes requiring a longer turn, after inactivity on both Windows and macOS. Code review identified a definite bridge-side defect: every media recovery armed the release gate even when no media control was held. The next nonzero input was consequently suppressed until its release. Current source arms the quarantine only for controls known to be held, preserves an existing quarantine across repeated recovery, and still requires a real media release to clear it. Portable tests reproduce the old first-pulse loss and cover the new idle/held cases. This fix does **not** prove the cause of every reported idle delay.
+
+后续反馈是在 Windows 和 macOS 闲置后，旋钮第一格无效，有时要转较多才响应。代码检查确认桥接中存在一个明确缺陷：每次媒体恢复都强制等待一次松开，即使当时没有媒体键按下，也会吞掉下一个非零动作。当前源码只隔离恢复时确实按住的媒体键，重复恢复不会解除已有隔离，解除仍要求真实媒体松开。自动化测试覆盖了旧逻辑吞首格以及新的空闲／按住情况。此修复**不能单独证明所有闲置延迟的原因**。
+
+Optional count traces show media input, desired output and USB completion timestamps, active-control counts and queue depth. Aggregate counters include gate suppression and input-pulse widths. They record neither usages nor payloads. USB completion confirms that the KVM received a transfer; it does not prove that the KVM forwarded that action to the selected computer.
+
+可选计数诊断记录媒体输入、期望输出、USB 完成的时间、活动控制数量和队列深度，汇总计数还包含门控拦截次数及输入脉冲宽度，不记录用途码或原始内容。USB 完成只证明 KVM 接收了传输，不证明它已把动作转到当前电脑。
+
+The [official Air75 V3 quick guide](https://www.nuphy.io/ali-oss/image/2025/07/10/469a9eceb212498ea8bc42e4f62ec877.png) documents automatic sleep after six minutes and Fn+] to toggle sleep (three green flashes: enabled; three red flashes: disabled). A direct-PC idle comparison and a temporary sleep-disabled comparison are useful controls; sleep has not been established as this report's cause.
+
+[Air75 V3 官方快速指南](https://www.nuphy.io/ali-oss/image/2025/07/10/469a9eceb212498ea8bc42e4f62ec877.png)标注约六分钟无操作后休眠，Fn+] 切换休眠开关（绿灯三闪：开启；红灯三闪：关闭）。直连电脑的闲置对照，以及临时关闭休眠后的对照，有助于区分无线唤醒与桥接延迟；这里尚未证明休眠就是本次原因。
+
 
 ### Final integrated regression / 最终集成版本回归
 
@@ -67,3 +81,10 @@ Application SHA-256 `128473103899f2bb9efb94bbd272c51de2dc490e3452eda37e7489e6144
 The offline `keyboard-bridge-media.yaml` profile built successfully at 2026-10-26 21:23:49 +08:00. Application SHA-256: `a4a9959094ab26bf7c9b9c22bf81476120e9618696fae72e496577f3cd40b4a0`. The linked `--hub --media` audit passed, including both HID interfaces and the compiled HCD ABI/reset wrapper. This standalone image was **not flashed** during this session. The [CI run for the implementation commit](https://github.com/yufeiran/esp32-p4-kvm-keyboard-bridge/actions/runs/40330742149) also runs sanitized portable tests and builds/audits all three example profiles; consult that run for its outcome.
 
 离线 `keyboard-bridge-media.yaml` 已于上述时间成功构建，应用 SHA-256 如上；`--hub --media` 最终链接检查通过，包含两个 HID 接口、HCD ABI 和复位包装器。此次**没有刷入独立镜像**。实现提交的 CI 同时运行带内存检查的测试及三种示例的构建／核验，状态以所链接的运行记录为准。
+
+
+### Knob diagnostic trial / 旋钮诊断测试版
+
+Integrated application `b26f8280f686e9ca977d3b289bd8838a42bed74edbc596fad544abe14e8d25d2` (2026-10-26 21:53:11 +08:00) contains the known-held recovery change and count-only timing diagnostics. OTA and successful boot were observed. At this recording the receiver was not on P4, so human regression and the idle-delay comparison are pending. The standalone media profile built and passed its linked audit, SHA-256 `78502721ca592d1d94fdcb006fcd9fdce60c1776331455fd31470f448f897573`; it was not flashed. Earlier hardware confirmations above apply to their named images, not automatically to this trial.
+
+集成诊断应用 `b26f8280…`（上述时间）包含按实际按住状态恢复门控的改动及计数时序诊断。OTA 和成功启动确认已观察到；记录时接收器未连接 P4，人工回归与闲置延迟对照仍待完成。独立媒体配置已构建并通过链接检查，SHA-256 如上，未刷入。上方旧版本的硬件确认不能自动算作本测试版也已通过。

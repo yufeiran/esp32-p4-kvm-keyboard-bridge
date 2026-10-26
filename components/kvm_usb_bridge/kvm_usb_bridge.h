@@ -51,7 +51,7 @@ class KVMUSBBridge : public Component {
   void set_drain_auxiliary_interfaces(bool value) { drain_auxiliary_interfaces_ = value; }
   void set_media_controls(bool value) { media_controls_ = value; }
   ControlState current_controls();
-  void controls_delivered() { media_delivered_.fetch_add(1); media_in_flight_.store(false); }
+  void controls_delivered(const uint8_t *report, uint16_t length);
   void controls_failed() { media_failed_.store(true); media_in_flight_.store(false); }
   void set_media_idle(uint8_t value) { media_idle_rate_.store(value); }
   BootReport current_report();
@@ -67,6 +67,7 @@ class KVMUSBBridge : public Component {
     uint8_t interface_number{0};
     uint16_t trace_counts{0xFFFF};
     uint16_t trace_length{0xFFFF};
+    uint32_t media_changed_at_ms{0};
   };
   struct Event {
     hid_host_device_handle_t handle{nullptr};
@@ -121,6 +122,8 @@ class KVMUSBBridge : public Component {
   std::atomic<uint32_t> media_queued_{0};
   std::atomic<uint8_t> media_idle_rate_{0}, media_count_{0};
   std::atomic<uint32_t> media_received_{0}, media_delivered_{0}, media_dropped_{0};
+  std::atomic<uint32_t> media_gate_blocked_{0}, media_submitted_at_ms_{0};
+  std::atomic<uint32_t> media_min_pulse_ms_{UINT32_MAX}, media_max_pulse_ms_{0};
   ReleaseGate release_gate_;
   QueueHandle_t events_{nullptr};
   QueueHandle_t controls_{nullptr};
